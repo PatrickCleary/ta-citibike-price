@@ -1,0 +1,21 @@
+---
+import "../styles/global.css";
+import Map from "../components/Map.tsx";
+import { Analytics } from "@vercel/analytics/react";
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Citi Bike Sheds</title>
+    <meta name="description" content="How far can you ride from each Citi Bike station?" />
+  </head>
+  <body>
+    <main class="h-screen w-screen">
+      <Map client:only="react" />
+      <Analytics client:only="react" />
+    </main>
+  </body>
+</html>
