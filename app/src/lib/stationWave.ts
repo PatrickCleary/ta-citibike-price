@@ -120,7 +120,7 @@ export class StationWave {
   // Call on a new selection or when the visible tiers change.
   select({ selectedId, near, ring, showNear, showRing, delays, hideOthers }: Selection) {
     const origin = this.byId.get(selectedId);
-    if (!origin) return;
+    if (!origin || !this.map.getLayer(STATIONS_LAYER)) return;
 
     // Straight-line distance ripple, used when no explicit delays are given.
     const cosLat = Math.cos((origin.lat * Math.PI) / 180);
@@ -184,6 +184,16 @@ export class StationWave {
   refresh() {
     if (this.raf == null) this.time = this.endTime + 1;
     this.applyAnim(this.time);
+  }
+
+  // Clear all selection styling — every station back to the resting dot field.
+  reset() {
+    if (this.raf != null) cancelAnimationFrame(this.raf);
+    this.raf = null;
+    if (!this.map.getLayer(STATIONS_LAYER)) return;
+    this.map.removeFeatureState({ source: STATIONS_SOURCE });
+    this.time = SETTLED;
+    this.applyAnim(SETTLED);
   }
 
   dispose() {
