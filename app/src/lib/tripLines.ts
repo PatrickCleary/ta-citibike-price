@@ -91,7 +91,7 @@ function overshoot(p: number): number {
 }
 
 // Rough equirectangular metres between two [lng, lat] points.
-function metres(a: [number, number], b: [number, number]): number {
+function meters(a: [number, number], b: [number, number]): number {
   const R = 6371000;
   const cosLat = Math.cos((a[1] * Math.PI) / 180);
   const dx = (((b[0] - a[0]) * Math.PI) / 180) * cosLat;
@@ -114,7 +114,7 @@ function decode(
   const timestamps = [jitter];
   for (let i = 1; i < path.length; i++) {
     timestamps.push(
-      timestamps[i - 1] + metres(path[i - 1], path[i]) / SPEED_MPS,
+      timestamps[i - 1] + meters(path[i - 1], path[i]) / SPEED_MPS,
     );
   }
   return { id, path, timestamps, color };
@@ -209,12 +209,13 @@ export class TripLines {
           line = [...WHITE, alpha];
         }
         heads.push({ position: pos, radius, fill, line });
-        if (this.origin) maxR = Math.max(maxR, metres(this.origin, pos));
+        if (this.origin) maxR = Math.max(maxR, meters(this.origin, pos) * 1.5);
       }
     };
 
     build(this.nearTrips, this.nearEnd, near);
     build(this.ringTrips, this.ringEnd, ring);
+    console.log(maxR);
     this.drawnRadius = maxR;
 
     const beforeId = this.beforeId();

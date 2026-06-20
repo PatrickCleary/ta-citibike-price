@@ -40,7 +40,7 @@ const RING_FADE = 0.15; // fraction of the ring phase used to fade the 11-min se
 
 // Camera: start tight on the station, zoom out to follow the trips.
 const MAX_ZOOM = 18;
-const MIN_ZOOM = 10.5;
+const MIN_ZOOM = 8.5;
 const FIT_PAD_PX = 80;
 const FIT_BUFFER = 1.25;
 
@@ -217,6 +217,22 @@ export default function Map() {
 
     const phase: Phase =
       p < INTRO_END ? "intro" : p < ZOOM_END ? "zoom" : p < NEAR_END ? "near" : "ring";
+
+    // Once a station is selected and we've left the intro, hide every station
+    // dot except the origin — filter the layer down to just that feature so the
+    // origin marker stays put while the rest of the field drops away. Cleared on
+    // scroll-back to intro (and when nothing is selected, so it stays pickable).
+    if (map.getLayer(STATIONS_LAYER)) {
+      const want = sel && phase !== "intro" ? sel.id : null;
+      const cur = map.getFilter(STATIONS_LAYER) as unknown[] | undefined;
+      const curId = Array.isArray(cur) ? (cur[2] as string) : null;
+      if (want !== curId) {
+        map.setFilter(
+          STATIONS_LAYER,
+          want ? ["==", ["get", "station_id"], want] : null,
+        );
+      }
+    }
 
     // Selection styling: full dot field during intro, isolate the origin after.
     if (phase === "intro") {

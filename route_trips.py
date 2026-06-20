@@ -63,38 +63,29 @@ def route(coords, origin_id, dest_id):
     return dest_id, None, f"FAIL: {last}"
 
 
-def main():
-    sid = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_STATION
-    coords = load_coords()
-    if sid not in coords:
-        sys.exit(f"Unknown station_id {sid}")
+def route_station(sid, coords, ex):
+    """Route every reachable trip from one station and write routes/<sid>.json.
 
-    with open(os.path.join(REACHDIR, f"{sid}.json")) as f:
+    Reuses the shared ThreadPoolExecutor `ex`. Returns a (total, ok, fail)
+    tuple, or None if the station has no reachable file.
+    """
+    reach_path = os.path.join(REACHDIR, f"{sid}.json")
+    if not os.path.exists(reach_path):
+        return None
+    with open(reach_path) as f:
         reach = json.load(f)
-    near = set(reach["11"])
     dests = [d for d in reach["45"] if d in coords]  # 45 is the full set
     missing_coords = len(reach["45"]) - len(dests)
 
-    os.makedirs(OUTDIR, exist_ok=True)
     geom = {}
     failures = []
-    t0 = time.time()
-    total = len(dests)
-    print(f"Routing {total} trips from {sid} ...", flush=True)
-    with ThreadPoolExecutor(max_workers=WORKERS) as ex:
-        futs = [ex.submit(route, coords, sid, d) for d in dests]
-        done = 0
-        for fut in as_completed(futs):
-            dest_id, poly, err = fut.result()
-            done += 1
-            if poly is not None:
-                geom[dest_id] = poly
-            else:
-                failures.append((dest_id, err))
-            if done % 100 == 0 or done == total:
-                rate = done / (time.time() - t0)
-                print(f"  {done}/{total}  {rate:.0f}/s  ok={len(geom)} "
-                      f"fail={len(failures)}", flush=True)
+    futs = [ex.submit(route, coords, sid, d) for d in dests]
+    for fut in as_completed(futs):
+        dest_id, poly, err = fut.result()
+        if poly is not None:
+            geom[dest_id] = poly
+        else:
+            failures.append((dest_id, err))
 
     out = {
         "station_id": sid,
@@ -109,15 +100,59 @@ def main():
     with open(tmp, "w") as f:
         json.dump(out, f)
     os.replace(tmp, path)
+    return len(dests), len(geom), len(failures), missing_coords
 
-    print(f"\nwrote {path} in {time.time()-t0:.0f}s")
-    print(f"  11-min trips: {len(out['11'])}  45-min trips: {len(out['45'])}")
-    if missing_coords:
-        print(f"  {missing_coords} reachable ids had no station coords (skipped)")
-    if failures:
-        print(f"  {len(failures)} routing failures:")
-        for d, e in failures[:10]:
-            print("   ", d, e)
+
+def run_one(sid, coords):
+    if sid not in coords:
+        sys.exit(f"Unknown station_id {sid}")
+    os.makedirs(OUTDIR, exist_ok=True)
+    t0 = time.time()
+    print(f"Routing trips from {sid} ...", flush=True)
+    with ThreadPoolExecutor(max_workers=WORKERS) as ex:
+        res = route_station(sid, coords, ex)
+    if res is None:
+        sys.exit(f"No reachable file for {sid}")
+    ok, fail = res[1], res[2]
+    print(f"wrote {OUTDIR}/{sid}.json in {time.time()-t0:.0f}s  "
+          f"ok={ok} fail={fail}", flush=True)
+
+
+def run_all(coords):
+    os.makedirs(OUTDIR, exist_ok=True)
+    sids = sorted(fn[:-5] for fn in os.listdir(REACHDIR) if fn.endswith(".json"))
+    done = {fn[:-5] for fn in os.listdir(OUTDIR) if fn.endswith(".json")}
+    todo = [s for s in sids if s not in done]
+    print(f"{len(sids)} stations, {len(done)} already routed, "
+          f"{len(todo)} to go", flush=True)
+
+    t0 = time.time()
+    routes_total = 0
+    with ThreadPoolExecutor(max_workers=WORKERS) as ex:
+        for i, sid in enumerate(todo, 1):
+            if sid not in coords:
+                print(f"  [{i}/{len(todo)}] {sid}: no coords, skipping", flush=True)
+                continue
+            res = route_station(sid, coords, ex)
+            if res is None:
+                continue
+            ok, fail = res[1], res[2]
+            routes_total += ok
+            elapsed = time.time() - t0
+            rate = routes_total / elapsed if elapsed else 0
+            print(f"  [{i}/{len(todo)}] {sid}: ok={ok} fail={fail}  "
+                  f"({rate:.0f} routes/s, {elapsed/60:.1f}m elapsed)", flush=True)
+    print(f"\ndone: {len(todo)} stations, {routes_total} routes "
+          f"in {(time.time()-t0)/60:.1f}m", flush=True)
+
+
+def main():
+    arg = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_STATION
+    coords = load_coords()
+    if arg == "all":
+        run_all(coords)
+    else:
+        run_one(arg, coords)
 
 
 if __name__ == "__main__":
