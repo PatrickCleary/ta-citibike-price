@@ -6,9 +6,9 @@
 // stations.geojson under public/ is gitignored. Re-run when the station list
 // changes:  npm run build:data
 //
-// Sheds are NOT bundled — the app fetches them at runtime from the Supabase
-// bucket referenced by PUBLIC_SHEDS_BASE_URL (see src/lib/sheds.ts). Upload
-// output/*.geojson to that bucket separately when sheds are regenerated.
+// Reachability lists are NOT bundled — the app fetches them at runtime from the
+// Supabase bucket referenced by PUBLIC_REACH_BASE_URL (see src/lib/sheds.ts).
+// Upload reachable/*.json to that bucket separately when they're regenerated.
 
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";

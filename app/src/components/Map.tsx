@@ -1,17 +1,33 @@
 import { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
-import { CONTOURS, fetchShed, type ContourMinutes } from "../lib/sheds";
+import { CONTOURS, fetchReach, type ContourMinutes } from "../lib/sheds";
+import {
+  StationWave,
+  stationPaint,
+  STATIONS_SOURCE,
+  STATIONS_LAYER,
+  type StationPoint,
+} from "../lib/stationWave";
+import { TripLines } from "../lib/tripLines";
+import { fetchRoutes } from "../lib/trips";
 
 const STADIA_KEY = import.meta.env.PUBLIC_STADIA_API_KEY;
-// Stadia "Alidade Smooth" — clean, low-contrast base that lets the sheds pop.
-const STYLE_URL = `https://tiles.stadiamaps.com/styles/alidade_smooth.json${
-  STADIA_KEY ? `?api_key=${STADIA_KEY}` : ""
-}`;
+// Custom "Alidade Smooth, no labels" style. Its tiles/sprite are served by
+// Stadia (keyless on localhost); transformRequest below appends the API key in
+// production.
+const STYLE_URL = "/data/custom_adilade_no_labels.json";
+
+// Attach the Stadia API key to any Stadia request when one is configured.
+const transformRequest: maplibregl.RequestTransformFunction = (url) => {
+  if (STADIA_KEY && url.includes("stadiamaps.com")) {
+    return { url: `${url}${url.includes("?") ? "&" : "?"}api_key=${STADIA_KEY}` };
+  }
+  return { url };
+};
 
 const INITIAL = { center: [-73.97, 40.73] as [number, number], zoom: 11.5 };
+const EMPTY: Set<string> = new Set();
 
-const SHED_SOURCE = "shed";
-const STATIONS_SOURCE = "stations";
 type Mode = ContourMinutes | "both";
 
 interface Selected {
@@ -19,10 +35,22 @@ interface Selected {
   name: string;
 }
 
+// Reachable station ids, split into the ≤11-min set and the 11–45-min ring
+// (stations reachable within 45 min but not within 11).
+interface Reach {
+  near: string[];
+  ring: string[];
+}
+
 export default function Map() {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
+  const waveRef = useRef<StationWave | null>(null);
+  const tripsRef = useRef<TripLines | null>(null);
   const [selected, setSelected] = useState<Selected | null>(null);
+  const [reach, setReach] = useState<Reach | null>(null);
+  const [routes, setRoutes] = useState<Awaited<ReturnType<typeof fetchRoutes>>>(null);
+  const [routesReady, setRoutesReady] = useState(false); // routes fetch settled (value or null)
   const [mode, setMode] = useState<Mode>("both");
   const [error, setError] = useState<string | null>(null);
 
@@ -34,128 +62,141 @@ export default function Map() {
       style: STYLE_URL,
       center: INITIAL.center,
       zoom: INITIAL.zoom,
+      transformRequest,
     });
     mapRef.current = map;
+    waveRef.current = new StationWave(map);
+    tripsRef.current = new TripLines(map);
     map.addControl(new maplibregl.NavigationControl(), "top-right");
 
+    // Coordinates for distance-based wave timing, loaded once.
+    fetch("/stations.geojson")
+      .then((r) => r.json())
+      .then((fc) => {
+        const list: StationPoint[] = [];
+        for (const f of fc.features) {
+          const id = f.properties?.station_id;
+          const [lon, lat] = f.geometry?.coordinates ?? [];
+          if (typeof id === "string" && typeof lon === "number") {
+            list.push({ id, lon, lat });
+          }
+        }
+        waveRef.current?.setStations(list);
+      })
+      .catch(() => {});
+
     map.on("load", () => {
-      // Stations: one slim GeoJSON, rendered as circles.
+      // promoteId lets us drive per-feature animation via feature-state.
       map.addSource(STATIONS_SOURCE, {
         type: "geojson",
         data: "/stations.geojson",
+        promoteId: "station_id",
       });
-
-      // Empty shed source; populated on click. Two fill layers, larger contour
-      // underneath so the faster ring stays readable on top.
-      map.addSource(SHED_SOURCE, {
-        type: "geojson",
-        data: { type: "FeatureCollection", features: [] },
-      });
-      for (const c of [...CONTOURS].reverse()) {
-        map.addLayer({
-          id: `shed-fill-${c.minutes}`,
-          type: "fill",
-          source: SHED_SOURCE,
-          filter: ["==", ["get", "contour"], c.minutes],
-          paint: { "fill-color": c.color, "fill-opacity": 0.22 },
-        });
-        map.addLayer({
-          id: `shed-line-${c.minutes}`,
-          type: "line",
-          source: SHED_SOURCE,
-          filter: ["==", ["get", "contour"], c.minutes],
-          paint: { "line-color": c.color, "line-width": 1.5, "line-opacity": 0.9 },
-        });
-      }
-
       map.addLayer({
-        id: "stations",
+        id: STATIONS_LAYER,
         type: "circle",
         source: STATIONS_SOURCE,
-        paint: {
-          "circle-radius": ["interpolate", ["linear"], ["zoom"], 10, 2.5, 15, 6],
-          "circle-color": "#1f2937",
-          "circle-stroke-color": "#ffffff",
-          "circle-stroke-width": 1,
-          "circle-opacity": 0.85,
-        },
+        paint: stationPaint(),
       });
 
-      map.on("click", "stations", (e) => {
+      map.on("click", STATIONS_LAYER, (e) => {
         const f = e.features?.[0];
         if (!f) return;
         const id = f.properties?.station_id as string;
         const name = (f.properties?.name as string) ?? "Station";
-        loadShed(id, name);
+        loadReach(id, name);
       });
-      map.on("mouseenter", "stations", () => {
+      map.on("mouseenter", STATIONS_LAYER, () => {
         map.getCanvas().style.cursor = "pointer";
       });
-      map.on("mouseleave", "stations", () => {
+      map.on("mouseleave", STATIONS_LAYER, () => {
         map.getCanvas().style.cursor = "";
       });
     });
 
-    return () => map.remove();
+    return () => {
+      waveRef.current?.dispose();
+      tripsRef.current?.dispose();
+      map.remove();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function loadShed(id: string, name: string) {
+  async function loadReach(id: string, name: string) {
     setError(null);
     setSelected({ id, name });
-    try {
-      const fc = await fetchShed(id);
-      const src = mapRef.current?.getSource(SHED_SOURCE) as
-        | maplibregl.GeoJSONSource
-        | undefined;
-      src?.setData(fc);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
+    setReach(null);
+    setRoutes(null);
+    setRoutesReady(false);
+    tripsRef.current?.clear(); // drop the previous station's lines immediately
+    // Reachable lists (counts + no-routes fallback) and routed geometries
+    // (trip lines + dot arrival timing) load in parallel.
+    fetchReach(id)
+      .then((r) => {
+        const near = new Set(r["11"]);
+        const ring = r["45"].filter((s) => !near.has(s));
+        setReach({ near: r["11"], ring });
+      })
+      .catch((err) =>
+        setError(err instanceof Error ? err.message : String(err)),
+      );
+    fetchRoutes(id)
+      .then(setRoutes)
+      .catch(() => setRoutes(null))
+      .finally(() => setRoutesReady(true));
   }
 
-  // --- highlight the selected station, fade the rest ----------------------
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !map.getLayer("stations")) return;
-    const id = selected?.id;
-    if (!id) {
-      map.setPaintProperty("stations", "circle-color", "#1f2937");
-      map.setPaintProperty("stations", "circle-opacity", 0.85);
-      map.setPaintProperty("stations", "circle-stroke-color", "#ffffff");
-      map.setPaintProperty("stations", "circle-radius", [
-        "interpolate", ["linear"], ["zoom"], 10, 2.5, 15, 6,
-      ]);
+  const showNear = mode === "both" || mode === 11;
+  const showRing = mode === "both" || mode === 45;
+
+  // Apply the current selection's dots + lines. `restart` replays the draw-out;
+  // otherwise it just recolors/retiers in place (e.g. on a mode toggle).
+  function applySelection(restart: boolean) {
+    const wave = waveRef.current;
+    const trips = tripsRef.current;
+    if (!wave || !selected) return;
+
+    if (routes) {
+      // Routed: trip lines + their head/dock dots render the destinations, so
+      // the MapLibre station layer shows only the origin (others hidden).
+      if (restart) trips?.show(routes, showNear, showRing);
+      else trips?.setVisibility(showNear, showRing);
+      wave.select({
+        selectedId: selected.id,
+        near: EMPTY, ring: EMPTY, showNear, showRing,
+        hideOthers: true,
+      });
+    } else if (reach) {
+      // No routes for this station: fall back to the distance ripple.
+      wave.select({
+        selectedId: selected.id,
+        near: new Set(reach.near),
+        ring: new Set(reach.ring),
+        showNear, showRing,
+      });
+    } else {
       return;
     }
-    const isSelected = ["==", ["get", "station_id"], id];
-    map.setPaintProperty("stations", "circle-color", [
-      "case", isSelected, "#ff2d55", "#1f2937",
-    ]);
-    map.setPaintProperty("stations", "circle-opacity", [
-      "case", isSelected, 1, 0.25,
-    ]);
-    map.setPaintProperty("stations", "circle-stroke-color", [
-      "case", isSelected, "#ff2d55", "#ffffff",
-    ]);
-    map.setPaintProperty("stations", "circle-radius", [
-      "case",
-      isSelected,
-      ["interpolate", ["linear"], ["zoom"], 10, 6, 15, 11],
-      ["interpolate", ["linear"], ["zoom"], 10, 2.5, 15, 6],
-    ]);
-  }, [selected]);
+    if (restart) wave.start();
+    else wave.refresh();
+  }
 
-  // --- contour visibility follows `mode` ----------------------------------
+  // Selection fully loaded (reach + routes settled) → run the animation.
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !map.isStyleLoaded()) return;
-    for (const c of CONTOURS) {
-      const visible = mode === "both" || mode === c.minutes ? "visible" : "none";
-      map.setLayoutProperty(`shed-fill-${c.minutes}`, "visibility", visible);
-      map.setLayoutProperty(`shed-line-${c.minutes}`, "visibility", visible);
-    }
-  }, [mode, selected]);
+    if (!selected || !reach || !routesReady) return;
+    applySelection(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected, reach, routesReady]);
+
+  // Mode toggle → recolor dots + retier visible trip lines instantly.
+  useEffect(() => {
+    applySelection(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
+
+  const counts = reach
+    ? { 11: reach.near.length, 45: reach.near.length + reach.ring.length }
+    : null;
 
   return (
     <div className="relative h-full w-full">
@@ -165,7 +206,7 @@ export default function Map() {
       <div className="absolute left-4 top-4 max-w-xs rounded-lg bg-white/90 p-4 shadow-lg backdrop-blur">
         <h1 className="text-base font-semibold text-gray-900">Citi Bike Sheds</h1>
         <p className="mt-1 text-sm text-gray-600">
-          {selected ? selected.name : "Click a station to see how far you can ride."}
+          {selected ? selected.name : "Click a station to see which stations you can reach."}
         </p>
         {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
 
@@ -191,10 +232,15 @@ export default function Map() {
           {CONTOURS.map((c) => (
             <div key={c.minutes} className="flex items-center gap-2 text-xs text-gray-600">
               <span
-                className="inline-block h-3 w-3 rounded-sm"
-                style={{ backgroundColor: c.color, opacity: 0.6 }}
+                className="inline-block h-3 w-3 rounded-full"
+                style={{ backgroundColor: c.color }}
               />
               {c.label}
+              {counts && (
+                <span className="ml-auto font-medium text-gray-900">
+                  {counts[c.minutes]}
+                </span>
+              )}
             </div>
           ))}
         </div>

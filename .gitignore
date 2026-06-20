@@ -1,4 +1,6 @@
 output/
+reachable/
+routes/
 .env
 valhalla/valhalla_tiles/
 valhalla/NewYork.osm.pbf

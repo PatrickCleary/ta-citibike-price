@@ -14,9 +14,14 @@ import urllib.error
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 BUCKET = "ta-citibike-price"
-PREFIX = "bikesheds"
-SRCDIR = "output"
-CONTENT_TYPE = "application/geo+json"
+# Defaults upload the shed polygons (output/ -> bikesheds/). Override via env to
+# upload the reachability lists instead:
+#   UPLOAD_SRCDIR=reachable UPLOAD_PREFIX=reachable UPLOAD_GLOB='*.json' \
+#       UPLOAD_CONTENT_TYPE=application/json python3 upload_to_supabase.py
+PREFIX = os.environ.get("UPLOAD_PREFIX", "bikesheds")
+SRCDIR = os.environ.get("UPLOAD_SRCDIR", "output")
+GLOB = os.environ.get("UPLOAD_GLOB", "*.geojson")
+CONTENT_TYPE = os.environ.get("UPLOAD_CONTENT_TYPE", "application/geo+json")
 WORKERS = 8
 RETRIES = 3
 
@@ -77,7 +82,7 @@ def upload(path):
 
 
 def main():
-    files = sorted(glob.glob(os.path.join(SRCDIR, "*.geojson")))
+    files = sorted(glob.glob(os.path.join(SRCDIR, GLOB)))
     only = sys.argv[1:]
     if only:
         files = [f for f in files if os.path.basename(f) in only

@@ -12,9 +12,12 @@
   },
   "dependencies": {
     "@astrojs/react": "^4.2.0",
+    "@deck.gl/mapbox": "^9.3.4",
+    "@mapbox/polyline": "^1.2.1",
     "@tailwindcss/vite": "^4.0.0",
     "@vercel/analytics": "^1.4.1",
     "astro": "^5.2.0",
+    "deck.gl": "^9.3.4",
     "maplibre-gl": "^5.1.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -22,6 +25,7 @@
   },
   "devDependencies": {
     "@types/geojson": "^7946.0.15",
+    "@types/mapbox__polyline": "^1.0.5",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0"
   }

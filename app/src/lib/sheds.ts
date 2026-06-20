@@ -1,35 +1,42 @@
-// Shed data access + contour configuration.
+// Reachability data access + tier configuration.
 //
-// Sheds are per-station GeoJSON FeatureCollections, each containing one polygon
-// per contour (minutes of biking). They're fetched lazily on station click from
-// PUBLIC_SHEDS_BASE_URL, which defaults to the public Supabase storage bucket but
-// can be overridden (e.g. /sheds for fully-local development).
+// For each station we precompute which OTHER stations are reachable within an
+// 11-min and 45-min bicycle ride (see compute_shed_mapping.py). The lists are
+// stored one small JSON per station and fetched lazily on click from
+// PUBLIC_REACH_BASE_URL, which defaults to the public Supabase storage bucket
+// but can be overridden (e.g. /reach for fully-local development).
 
-import type { FeatureCollection } from "geojson";
+const DEFAULT_REACH_BASE_URL =
+  "https://kevndteqglsoslznrntz.supabase.co/storage/v1/object/public/ta-citibike-price/reachable";
 
-const DEFAULT_SHEDS_BASE_URL =
-  "https://kevndteqglsoslznrntz.supabase.co/storage/v1/object/public/ta-citibike-price/bikesheds";
-
-export const SHEDS_BASE_URL = (
-  import.meta.env.PUBLIC_SHEDS_BASE_URL || DEFAULT_SHEDS_BASE_URL
+export const REACH_BASE_URL = (
+  import.meta.env.PUBLIC_REACH_BASE_URL || DEFAULT_REACH_BASE_URL
 ).replace(/\/$/, "");
 
-// The contours produced by compute_bikesheds.py, fastest first.
+// Reachability tiers, fastest first. Colors are used to paint station circles.
 export const CONTOURS = [
-  { minutes: 11, color: "#10b981", label: "11 min" }, // emerald
-  { minutes: 45, color: "#6366f1", label: "45 min" }, // indigo
+  { minutes: 11, color: "#10b981", label: "Reachable ≤ 11 min" }, // emerald
+  { minutes: 45, color: "#6366f1", label: "Reachable ≤ 45 min" }, // indigo
 ] as const;
 
 export type ContourMinutes = (typeof CONTOURS)[number]["minutes"];
 
-const cache = new Map<string, Promise<FeatureCollection>>();
+// Shape of a per-station reachability file: lists of reachable station ids.
+// "45" is a superset of "11"; the origin station is excluded from both.
+export interface Reach {
+  "11": string[];
+  "45": string[];
+}
 
-export function fetchShed(stationId: string): Promise<FeatureCollection> {
+const cache = new Map<string, Promise<Reach>>();
+
+export function fetchReach(stationId: string): Promise<Reach> {
   let p = cache.get(stationId);
   if (!p) {
-    p = fetch(`${SHEDS_BASE_URL}/${stationId}.geojson`).then((res) => {
-      if (!res.ok) throw new Error(`No shed for station ${stationId} (${res.status})`);
-      return res.json() as Promise<FeatureCollection>;
+    p = fetch(`${REACH_BASE_URL}/${stationId}.json`).then((res) => {
+      if (!res.ok)
+        throw new Error(`No reachability for station ${stationId} (${res.status})`);
+      return res.json() as Promise<Reach>;
     });
     cache.set(stationId, p);
   }
