@@ -377,12 +377,12 @@ export default function Map() {
             </Caption>
             <Caption active={phase === "near"}>
               <span className="block text-2xl font-semibold text-gray-900">
-                How far can you get in 11 minutes?
+                How far does a $3 Citi bike ride take you today?
               </span>
             </Caption>
             <Caption active={phase === "ring"}>
               <span className="block text-2xl font-semibold text-gray-900">
-                And in 45 minutes?
+                And if 45 minute rides were capped at $3?
               </span>
             </Caption>
           </div>
