@@ -2,10 +2,10 @@
 //
 // On selection we decode the origin station's per-destination polylines and
 // feed them to a deck.gl TripsLayer. Each vertex carries a timestamp = the ride
-// time to reach it at a constant 11.2 mph, and a global `currentTime` advances
-// at a fixed playback rate. So the drawing "head" moves at one real speed for
-// every trip and every station, and each line's draw duration is proportional
-// to its actual ride time. fadeTrail is off, so lines persist once drawn.
+// time to reach it at a constant 11.2 mph. A global `currentTime` is driven by
+// scroll progress (see setProgress): scrolling scrubs every line outward from
+// the origin, nearer destinations completing first. fadeTrail is off, so lines
+// persist once drawn.
 //
 // A second layer (ScatterplotLayer) renders a dot riding the head of each line;
 // when it reaches the destination dock it "plops" (scale overshoot) and settles
@@ -24,8 +24,8 @@ const COLOR_RING: [number, number, number] = [99, 102, 241]; // 11–45 min — 
 
 // Ride speed used to convert route distance into ride time.
 const SPEED_MPS = (11.2 * 1609.344) / 3600; // 11.2 mph ≈ 5.01 m/s
-// Time compression: ride-seconds drawn per wall-clock second. At 600×, a
-// 45-min trip draws in ~4.5s; a 10-min trip in ~1s.
+// Maps wall-ms to ride-seconds for the dock plop curve (the only remaining
+// wall-time-shaped piece now that scroll drives the clock).
 const PLAYBACK = 600;
 // Random per-trip departure stagger so they don't all leave at once. Expressed
 // in wall-ms, converted to ride-seconds for the shared clock.
@@ -117,18 +117,28 @@ function decode(
 export class TripLines {
   private overlay: MapboxOverlay;
   private trips: Trip[] = [];
-  private maxTime = 1;
+  private endTime = 1; // ride-seconds at full scroll (last arrival + plop tail)
   private currentTime = 0;
   private showNear = true;
   private showRing = true;
-  private raf: number | null = null;
+  private origin: [number, number] | null = null; // [lng, lat]
+  private drawnRadius = 0; // metres from origin to the furthest drawn head
+
+  // Origin coordinate of the current selection ([lng, lat]), or null.
+  getOrigin(): [number, number] | null {
+    return this.origin;
+  }
+  // How far (metres) the trips currently reach from the origin — for camera fit.
+  getDrawnRadius(): number {
+    return this.drawnRadius;
+  }
 
   constructor(map: Map) {
     this.overlay = new MapboxOverlay({ interleaved: true, layers: [] });
     map.addControl(this.overlay);
   }
 
-  // Decode a station's routes and ripple the lines out from the origin.
+  // Decode a station's routes; nothing is drawn until scroll advances progress.
   show(routes: Routes, showNear: boolean, showRing: boolean) {
     const near = new Set(Object.keys(routes["11"]));
     const trips: Trip[] = [];
@@ -137,16 +147,25 @@ export class TripLines {
       if (t) trips.push(t);
     }
     this.trips = trips;
-    this.maxTime = trips.reduce(
+    this.origin = routes.origin;
+    const maxTime = trips.reduce(
       (m, t) => Math.max(m, t.timestamps[t.timestamps.length - 1]),
       1,
     );
+    // Reserve a tail so the last arrival's dock plop completes at progress 1.
+    this.endTime = maxTime + (PLOP_MS / 1000) * PLAYBACK;
     this.showNear = showNear;
     this.showRing = showRing;
-    this.start();
+    this.render(0);
   }
 
-  // Toggle visible tiers without re-running the draw-out.
+  // Scrub the draw-out to a scroll progress in [0, 1].
+  setProgress(p: number) {
+    const clamped = p < 0 ? 0 : p > 1 ? 1 : p;
+    this.render(clamped * this.endTime);
+  }
+
+  // Toggle visible tiers without changing progress.
   setVisibility(showNear: boolean, showRing: boolean) {
     this.showNear = showNear;
     this.showRing = showRing;
@@ -154,34 +173,12 @@ export class TripLines {
   }
 
   clear() {
-    if (this.raf != null) cancelAnimationFrame(this.raf);
-    this.raf = null;
     this.trips = [];
     this.overlay.setProps({ layers: [] });
   }
 
   dispose() {
-    if (this.raf != null) cancelAnimationFrame(this.raf);
-    this.raf = null;
-  }
-
-  private start() {
-    if (this.raf != null) cancelAnimationFrame(this.raf);
-    const t0 = performance.now();
-    // Run past the last arrival so its dock plop finishes too.
-    const end = this.maxTime + (PLOP_MS / 1000) * PLAYBACK;
-    const tick = () => {
-      // currentTime in ride-seconds, advancing PLAYBACK× real time.
-      const t = ((performance.now() - t0) / 1000) * PLAYBACK;
-      if (t < end) {
-        this.render(t);
-        this.raf = requestAnimationFrame(tick);
-      } else {
-        this.raf = null;
-        this.render(end); // settle fully drawn + docked
-      }
-    };
-    this.raf = requestAnimationFrame(tick);
+    this.overlay.setProps({ layers: [] });
   }
 
   private render(time: number) {
@@ -191,21 +188,28 @@ export class TripLines {
     );
 
     // Head dot for each visible, departed trip: rides the line while drawing,
-    // then plops into place once it reaches the destination dock.
+    // then plops into place once it reaches the destination dock. Track the
+    // furthest head from the origin so the camera can fit the drawn extent.
     const heads: Head[] = [];
+    let maxR = 0;
     for (const t of data) {
       if (time < t.timestamps[0]) continue; // not departed yet (jitter window)
       const arrival = t.timestamps[t.timestamps.length - 1];
+      let pos: [number, number];
       if (time < arrival) {
         // Traveling: white bead with a colored ring, so it pops off the line.
-        heads.push({ position: positionAt(t, time), radius: TRAVEL_R, fill: WHITE, line: t.color });
+        pos = positionAt(t, time);
+        heads.push({ position: pos, radius: TRAVEL_R, fill: WHITE, line: t.color });
       } else {
         // Docked: colored dot with a white ring; plop scale overshoots.
         const plopMs = ((time - arrival) / PLAYBACK) * 1000;
         const radius = DOCK_R * overshoot(Math.min(plopMs / PLOP_MS, 1));
-        heads.push({ position: t.path[t.path.length - 1], radius, fill: t.color, line: WHITE });
+        pos = t.path[t.path.length - 1];
+        heads.push({ position: pos, radius, fill: t.color, line: WHITE });
       }
+      if (this.origin) maxR = Math.max(maxR, metres(this.origin, pos));
     }
+    this.drawnRadius = maxR;
 
     this.overlay.setProps({
       layers: [
@@ -222,7 +226,7 @@ export class TripLines {
           jointRounded: true,
           opacity: 0.7,
           currentTime: time,
-          trailLength: this.maxTime, // no fade — keep lines once drawn
+          trailLength: this.endTime, // no fade — keep lines once drawn
           fadeTrail: false,
           // valid in interleaved mode; not in the layer prop typings
           // @ts-expect-error
