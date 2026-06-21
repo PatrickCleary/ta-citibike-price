@@ -86,9 +86,13 @@ export function tiersForPhase(
       all: HIDDEN,
     };
   }
+  // The ≤45 set is a superset of the ≤11 set, so the all tier already covers
+  // every near destination — draw it alone, recoloured all-blue. (Don't also
+  // draw the near tier: it's scaled by nearEnd, not allEnd, so it'd crawl out
+  // at ~nearEnd/allEnd speed as a redundant slow second wave.)
   return {
-    near: { visible: true, progress: t, opacity: 1, color: COLOR_ALL },
-    all: { visible: true, progress: t, opacity: 1 },
+    near: HIDDEN,
+    all: { visible: true, progress: t, opacity: 1, color: COLOR_ALL },
   };
 }
 
