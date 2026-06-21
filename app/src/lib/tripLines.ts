@@ -19,7 +19,7 @@ import type { Routes } from "./trips";
 import { STATIONS_LAYER } from "./stationWave";
 
 const COLOR_NEAR: [number, number, number] = [16, 185, 129]; // ≤11 min — emerald
-const COLOR_RING: [number, number, number] = [99, 102, 241]; // 11–45 min — indigo
+export const COLOR_RING: [number, number, number] = [99, 102, 241]; // 11–45 min — indigo
 
 // Ride speed used to convert route distance into ride time.
 const SPEED_MPS = (11.2 * 1609.344) / 3600; // 11.2 mph ≈ 5.01 m/s
@@ -33,8 +33,8 @@ const TRIP_NEAR = "trip-near";
 const TRIP_RING = "trip-ring";
 const HEAD_LAYER = "trip-heads";
 
-const TRAVEL_R = 4; // px — bead riding the head of a drawing line
-const DOCK_R = 4.5; // px — settled dot once docked
+const TRAVEL_R = 3; // px — bead riding the head of a drawing line
+const DOCK_R = 3; // px — settled dot once docked
 const PLOP_MS = 450; // wall-clock duration of the dock plop
 const WHITE: [number, number, number] = [255, 255, 255];
 
@@ -57,6 +57,7 @@ export interface TierState {
   visible: boolean;
   progress: number; // 0..1 draw-out
   opacity: number; // 0..1
+  color?: [number, number, number]; // override the trips' baked color (else per-trip)
 }
 
 const HIDDEN: TierState = { visible: false, progress: 0, opacity: 1 };
@@ -137,6 +138,8 @@ export class TripLines {
   private ringEnd = 1;
   private origin: [number, number] | null = null; // [lng, lat]
   private drawnRadius = 0; // metres from origin to the furthest drawn head
+  private nearRadius = 0; // metres to the furthest ≤11-min destination (final)
+  private allRadius = 0; // metres to the furthest ≤45-min destination (final)
   private map: Map;
 
   constructor(map: Map) {
@@ -155,6 +158,14 @@ export class TripLines {
   }
   getDrawnRadius(): number {
     return this.drawnRadius;
+  }
+  // Final extent of a tier (metres from origin to its furthest destination),
+  // independent of draw progress — used to frame a steady camera per phase.
+  getNearRadius(): number {
+    return this.nearRadius;
+  }
+  getAllRadius(): number {
+    return this.allRadius;
   }
 
   // Decode a station's routes into the two tiers. The ring is the 11–45 min
@@ -177,6 +188,14 @@ export class TripLines {
     this.origin = routes.origin;
     this.nearEnd = endTimeOf(this.nearTrips);
     this.ringEnd = endTimeOf(this.ringTrips);
+
+    // Final tier extents: furthest destination (last path vertex) per tier.
+    const o = this.origin;
+    const reach = (trips: Trip[]) =>
+      trips.reduce((m, t) => Math.max(m, meters(o, t.path[t.path.length - 1])), 0);
+    this.nearRadius = reach(this.nearTrips);
+    this.allRadius = Math.max(this.nearRadius, reach(this.ringTrips));
+
     this.setTiers(HIDDEN, HIDDEN);
   }
 
@@ -191,6 +210,7 @@ export class TripLines {
       const alpha = Math.round(tier.opacity * 255);
       for (const t of trips) {
         if (time < t.timestamps[0]) continue; // not departed (jitter window)
+        const col = tier.color ?? t.color; // tier override, else baked per-trip
         const arrival = t.timestamps[t.timestamps.length - 1];
         let pos: [number, number];
         let radius: number;
@@ -200,22 +220,22 @@ export class TripLines {
           pos = positionAt(t, time);
           radius = TRAVEL_R;
           fill = [...WHITE, alpha];
-          line = [...t.color, alpha];
+          line = [...col, alpha];
         } else {
           const plopMs = ((time - arrival) / PLAYBACK) * 1000;
           radius = DOCK_R * overshoot(Math.min(plopMs / PLOP_MS, 1));
           pos = t.path[t.path.length - 1];
-          fill = [...t.color, alpha];
+          fill = [...col, alpha];
           line = [...WHITE, alpha];
         }
         heads.push({ position: pos, radius, fill, line });
-        if (this.origin) maxR = Math.max(maxR, meters(this.origin, pos) * 1.5);
+        if (this.origin) maxR = Math.max(maxR, meters(this.origin, pos));
       }
     };
 
     build(this.nearTrips, this.nearEnd, near);
     build(this.ringTrips, this.ringEnd, ring);
-    console.log(maxR);
+
     this.drawnRadius = maxR;
 
     const beforeId = this.beforeId();
@@ -230,8 +250,9 @@ export class TripLines {
         data: tier.visible ? trips : [],
         getPath: (d) => d.path,
         getTimestamps: (d) => d.timestamps,
-        getColor: (d) => d.color,
-        getWidth: 4,
+        getColor: (d) => tier.color ?? d.color,
+        updateTriggers: { getColor: tier.color?.join() ?? "self" },
+        getWidth: 2,
         widthUnits: "pixels",
         widthMinPixels: 2.5,
         capRounded: true,

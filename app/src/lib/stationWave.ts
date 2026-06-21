@@ -159,6 +159,30 @@ export class StationWave {
     this.endTime = maxDelay + FADE_MS;
   }
 
+  // Intro: ripple the WHOLE station field in at full opacity (no selection),
+  // plopping outward from `center`. Used on first load before any station is
+  // picked. Call start() after to play it.
+  appearAll(center: [number, number]) {
+    if (!this.map.getLayer(STATIONS_LAYER)) return;
+    const cosLat = Math.cos((center[1] * Math.PI) / 180);
+    const dist = (s: StationPoint) =>
+      Math.hypot((s.lon - center[0]) * cosLat, s.lat - center[1]);
+    let max = 0;
+    for (const s of this.stations) max = Math.max(max, dist(s));
+    max = max || 1;
+
+    let maxDelay = 0;
+    for (const s of this.stations) {
+      const delay = (dist(s) / max) * WAVE_MS;
+      maxDelay = Math.max(maxDelay, delay);
+      this.map.setFeatureState(
+        { source: STATIONS_SOURCE, id: s.id },
+        { delay, op: 0.85, color: BASE_COLOR, stroke: "#ffffff", r: 2.5 },
+      );
+    }
+    this.endTime = maxDelay + FADE_MS;
+  }
+
   // Run the ripple from time 0, then settle.
   start() {
     if (this.raf != null) cancelAnimationFrame(this.raf);

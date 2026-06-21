@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import { CONTOURS, fetchReach } from "../lib/sheds";
 import {
@@ -8,7 +8,7 @@ import {
   STATIONS_LAYER,
   type StationPoint,
 } from "../lib/stationWave";
-import { TripLines, type TierState } from "../lib/tripLines";
+import { TripLines, COLOR_RING, type TierState } from "../lib/tripLines";
 import { fetchRoutes } from "../lib/trips";
 
 const STADIA_KEY = import.meta.env.PUBLIC_STADIA_API_KEY;
@@ -23,28 +23,35 @@ const transformRequest: maplibregl.RequestTransformFunction = (url) => {
   return { url };
 };
 
-// Station shown on load; scrolling scrubs its trips out.
-const AUTO_ID = "1965202298784063998";
-// Scroll track height (vh). The map is pinned; this much scroll = progress 0→1.
-const SCROLL_VH = 600;
 const EMPTY: Set<string> = new Set();
 
-// Full-metro view shown during the intro, before zooming into the station.
+// Full-metro view shown before a station is picked.
 const FULL_VIEW = { center: [-73.95, 40.71] as [number, number], zoom: 10.3 };
 
-// Scroll-progress phase boundaries.
-const INTRO_END = 0.1; // [0, 0.10)   full map + prompt
-const ZOOM_END = 0.22; // [0.10, 0.22) fly into the station
-const NEAR_END = 0.55; // [0.22, 0.55) ≤11-min trips draw; then 45-min to 1.0
-const RING_FADE = 0.15; // fraction of the ring phase used to fade the 11-min set
+// Animation timeline. A single p ∈ [0,1] is driven by the prev/next buttons
+// (not scroll) and plays, in order: fly into the station → draw the ≤11-min
+// trips → fade the ≤11 set out → draw the 45-min ring.
+const FLY_END = 0.15; // [0, .15)   zoom from the metro into the station
+const NEAR_END = 0.5; // [.15, .5)  ≤11-min trips draw
+const FADE_END = 0.7; // [.5, .7)   ≤11-min trips fade out completely
+//                       [.7, 1]    45-min ring draws
 
-// Camera: start tight on the station, zoom out to follow the trips.
+// Narrated steps the prev/next buttons move between. `p` is the timeline target
+// each lands on; `dur` is how long that transition plays (ms); `title` is the
+// caption shown while on that step.
+const STEPS = [
+  { key: "near", p: NEAR_END, dur: 2200, title: "How far does a $3 Citi Bike ride take you today?" },
+  { key: "fade", p: FADE_END, dur: 1400, title: "We want to subsidize it to 45 minutes." },
+  { key: "ring", p: 1.0, dur: 2400, title: "Here's how far $3 could take you." },
+] as const;
+
+// Camera fit.
 const MAX_ZOOM = 18;
 const MIN_ZOOM = 8.5;
-const FIT_PAD_PX = 80;
-const FIT_BUFFER = 1.25;
+const FIT_PAD_PX = 0;
+const FIT_BUFFER = 1;
 
-type Phase = "intro" | "zoom" | "near" | "ring";
+type Phase = "intro" | "fly" | "near" | "fade" | "ring";
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x);
@@ -56,7 +63,9 @@ function zoomForRadius(map: maplibregl.Map, lat: number, radiusM: number): numbe
   const c = map.getCanvas();
   const avail = Math.min(c.clientWidth, c.clientHeight) / 2 - FIT_PAD_PX;
   if (!(radiusM > 0) || avail <= 0) return MAX_ZOOM;
-  const mppAtZ0 = 156543.03392 * Math.cos((lat * Math.PI) / 180);
+  // 78271.517 = world circumference / 512 (MapLibre uses 512px tiles, so the
+  // world is 512px wide at zoom 0 — NOT the 256px-tile 156543 value).
+  const mppAtZ0 = 78271.51696 * Math.cos((lat * Math.PI) / 180);
   const z = Math.log2((avail * mppAtZ0) / radiusM);
   return Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, z));
 }
@@ -79,18 +88,20 @@ export default function Map() {
   const waveRef = useRef<StationWave | null>(null);
   const tripsRef = useRef<TripLines | null>(null);
   const selectedRef = useRef<Selected | null>(null);
-  const appliedRef = useRef(false); // selection styling currently applied?
-  const phaseRef = useRef<Phase>("intro");
+  const appliedRef = useRef(false); // origin styling currently applied?
+  const introRef = useRef(false); // intro ripple already played?
   const coordsRef = useRef(new globalThis.Map<string, [number, number]>()); // id → [lng, lat]
-  const targetPRef = useRef(0); // scroll progress target
-  const curPRef = useRef(0); // smoothed progress actually rendered
-  const rafRef = useRef<number | null>(null);
+  const curPRef = useRef(0); // current point on the animation timeline [0,1]
+  const animRef = useRef<number | null>(null); // in-flight tween rAF
+  const stepRef = useRef(-1); // current step index (−1 = intro, no selection)
+  const startedRef = useRef(false); // has the ≤11 draw kicked off for this pick?
+  const flyFromRef = useRef<{ center: [number, number]; zoom: number } | null>(null); // camera at pick time
 
   const [selected, setSelected] = useState<Selected | null>(null);
   const [reach, setReach] = useState<Reach | null>(null);
   const [routes, setRoutes] = useState<Awaited<ReturnType<typeof fetchRoutes>>>(null);
   const [routesReady, setRoutesReady] = useState(false);
-  const [phase, setPhase] = useState<Phase>("intro");
+  const [step, setStep] = useState(-1); // mirrors stepRef for button render
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -110,15 +121,10 @@ export default function Map() {
     mapRef.current = map;
     waveRef.current = new StationWave(map);
     tripsRef.current = new TripLines(map);
-    // Fully scroll-driven: no user pan/zoom/rotate. (Clicks still select.)
-    map.scrollZoom.disable();
-    map.dragPan.disable();
+    // Pan/zoom stay enabled (defaults) so the intro is explorable; they're
+    // locked while the camera-driven story plays. Rotation/pitch stay off (2D).
     map.dragRotate.disable();
-    map.doubleClickZoom.disable();
-    map.touchZoomRotate.disable();
     map.touchPitch.disable();
-    map.keyboard.disable();
-    map.boxZoom.disable();
 
     fetch("/stations.geojson")
       .then((r) => r.json())
@@ -131,12 +137,11 @@ export default function Map() {
           if (typeof id === "string" && typeof lon === "number") {
             list.push({ id, lon, lat });
             coordsRef.current.set(id, [lon, lat]);
-            if (id === AUTO_ID) autoName = f.properties?.name ?? autoName;
-          }
+           }
         }
         waveRef.current?.setStations(list);
-        loadReach(AUTO_ID, autoName);
-      })
+        playIntro();
+       })
       .catch(() => {});
 
     map.on("load", () => {
@@ -166,9 +171,10 @@ export default function Map() {
         map.getCanvas().style.cursor = "";
       });
 
-      // Station layer now exists → re-render so deck layers sit beneath it and
-      // the current scroll phase is applied.
-      kick();
+      // Station layer now exists → paint the current frame and (once stations
+      // have also loaded) ripple the field in.
+      render();
+      playIntro();
     });
 
     return () => {
@@ -179,13 +185,51 @@ export default function Map() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function loadReach(id: string, name: string) {
+  // Ripple the whole station field in, once stations + layer are both ready.
+  const playIntro = useCallback(() => {
+    const wave = waveRef.current;
+    const map = mapRef.current;
+    if (introRef.current || !wave || !map?.getLayer(STATIONS_LAYER)) return;
+    if (coordsRef.current.size === 0) return; // stations not loaded yet
+    introRef.current = true;
+    wave.appearAll(FULL_VIEW.center);
+    wave.start();
+  }, []);
+
+  // Enable/disable user pan + zoom (rotation/pitch stay off). Locked while the
+  // story's camera animation runs; unlocked in the pickable intro.
+  function setInteractive(on: boolean) {
+    const map = mapRef.current;
+    if (!map) return;
+    const fn = on ? "enable" : "disable";
+    map.scrollZoom[fn]();
+    map.dragPan[fn]();
+    map.doubleClickZoom[fn]();
+    map.touchZoomRotate[fn]();
+    map.boxZoom[fn]();
+    map.keyboard[fn]();
+  }
+
+  function loadReach(id: string, name: string) {
     setError(null);
+    setInteractive(false); // lock the map for the camera-driven story
+    // Fly in from wherever the user left the intro camera, not a fixed view.
+    const c = mapRef.current?.getCenter();
+    flyFromRef.current = c
+      ? { center: [c.lng, c.lat], zoom: mapRef.current!.getZoom() }
+      : null;
     setSelected({ id, name });
     setReach(null);
     setRoutes(null);
     setRoutesReady(false);
     appliedRef.current = false;
+    startedRef.current = false;
+    stepRef.current = -1;
+    curPRef.current = 0;
+    if (animRef.current != null) {
+      cancelAnimationFrame(animRef.current);
+      animRef.current = null;
+    }
     waveRef.current?.reset();
     tripsRef.current?.clear();
     fetchReach(id)
@@ -203,27 +247,31 @@ export default function Map() {
       .finally(() => setRoutesReady(true));
   }
 
-  // The core scroll → phase mapping: drives tiers, camera, selection + caption.
-  // `p` is the (smoothed) scroll progress in [0, 1].
+  // Render one frame of the timeline at point `p` ∈ [0,1]: phase, dot isolation,
+  // trip tiers, and a steady per-phase camera. Pure function of `p` + selection.
   const scrub = useCallback((p: number) => {
     const map = mapRef.current;
     const trips = tripsRef.current;
     const wave = waveRef.current;
     if (!map) return;
 
-    // Centre on the selected station itself (independent of whether it's routed).
     const sel = selectedRef.current;
     const origin = sel ? coordsRef.current.get(sel.id) ?? null : null;
 
-    const phase: Phase =
-      p < INTRO_END ? "intro" : p < ZOOM_END ? "zoom" : p < NEAR_END ? "near" : "ring";
+    const phase: Phase = !origin
+      ? "intro"
+      : p < FLY_END
+        ? "fly"
+        : p < NEAR_END
+          ? "near"
+          : p < FADE_END
+            ? "fade"
+            : "ring";
 
-    // Once a station is selected and we've left the intro, hide every station
-    // dot except the origin — filter the layer down to just that feature so the
-    // origin marker stays put while the rest of the field drops away. Cleared on
-    // scroll-back to intro (and when nothing is selected, so it stays pickable).
+    // Isolate the origin dot once a station is picked; show the full field in
+    // the intro so any station stays clickable.
     if (map.getLayer(STATIONS_LAYER)) {
-      const want = sel && phase !== "intro" ? sel.id : null;
+      const want = origin ? sel!.id : null;
       const cur = map.getFilter(STATIONS_LAYER) as unknown[] | undefined;
       const curId = Array.isArray(cur) ? (cur[2] as string) : null;
       if (want !== curId) {
@@ -234,15 +282,10 @@ export default function Map() {
       }
     }
 
-    // Selection styling: full dot field during intro, isolate the origin after.
-    if (phase === "intro") {
-      if (appliedRef.current) {
-        wave?.reset();
-        appliedRef.current = false;
-      }
-    } else if (!appliedRef.current && selectedRef.current && wave) {
+    // Origin styling: applied once per pick (red marker + a little plop).
+    if (origin && !appliedRef.current && wave) {
       wave.select({
-        selectedId: selectedRef.current.id,
+        selectedId: sel!.id,
         near: EMPTY,
         ring: EMPTY,
         showNear: true,
@@ -253,91 +296,141 @@ export default function Map() {
       appliedRef.current = true;
     }
 
-    // Tiers.
+    // Trip tiers.
     if (trips) {
-      if (phase === "intro" || phase === "zoom") {
+      if (phase === "intro" || phase === "fly") {
         trips.setTiers(HIDDEN, HIDDEN);
       } else if (phase === "near") {
-        const np = clamp01((p - ZOOM_END) / (NEAR_END - ZOOM_END));
+        const np = clamp01((p - FLY_END) / (NEAR_END - FLY_END));
         trips.setTiers({ visible: true, progress: np, opacity: 1 }, HIDDEN);
+      } else if (phase === "fade") {
+        const fp = clamp01((p - NEAR_END) / (FADE_END - NEAR_END));
+        trips.setTiers({ visible: true, progress: 1, opacity: 1 - fp }, HIDDEN);
       } else {
-        const rp = clamp01((p - NEAR_END) / (1 - NEAR_END));
-        const nearOpacity = lerp(1, 0.25, clamp01(rp / RING_FADE));
+        // Second animation draws ALL trips together — the ≤11 set redraws
+        // alongside the 11–45 ring so the full ≤45-min reach fans out at once,
+        // all in the tier-2 blue (the ≤11 set drops its green here).
+        const rp = clamp01((p - FADE_END) / (1 - FADE_END));
         trips.setTiers(
-          { visible: true, progress: 1, opacity: nearOpacity },
+          { visible: true, progress: rp, opacity: 1, color: COLOR_RING },
           { visible: true, progress: rp, opacity: 1 },
         );
       }
     }
 
-    // Camera: the station stays centred the whole time — it's a pure zoom, no
-    // pan. Intro frames the metro around it, then we zoom straight in and back
-    // out to follow the trips.
-    if (phase === "intro") {
-      map.jumpTo({ center: origin ?? FULL_VIEW.center, zoom: FULL_VIEW.zoom });
-    } else if (origin && phase === "zoom") {
-      const t = easeInOut(clamp01((p - INTRO_END) / (ZOOM_END - INTRO_END)));
-      map.jumpTo({ center: origin, zoom: lerp(FULL_VIEW.zoom, MAX_ZOOM, t) });
-    } else if (origin) {
-      const radius = (trips?.getDrawnRadius() ?? 0) * FIT_BUFFER + 150;
-      map.jumpTo({ center: origin, zoom: zoomForRadius(map, origin[1], radius) });
-    }
-
-    if (phaseRef.current !== phase) {
-      phaseRef.current = phase;
-      setPhase(phase);
+    // Camera: hold a steady fit per phase so the lines draw *within* the frame
+    // instead of the camera chasing the drawing front. Fly zooms metro→≤11 fit;
+    // ring eases ≤11 fit→45-min fit as the outer band draws.
+    if (!origin) {
+      map.jumpTo({ center: FULL_VIEW.center, zoom: FULL_VIEW.zoom });
+    } else {
+      const zNear = zoomForRadius(map, origin[1], (trips?.getNearRadius() ?? 0) * FIT_BUFFER + 150);
+      const zAll = zoomForRadius(map, origin[1], (trips?.getAllRadius() ?? 0) * FIT_BUFFER + 150);
+      if (phase === "fly") {
+        // Ease from the user's pre-pick camera into the ≤11-min fit.
+        const from = flyFromRef.current ?? { center: FULL_VIEW.center, zoom: FULL_VIEW.zoom };
+        const t = easeInOut(clamp01(p / FLY_END));
+        map.jumpTo({
+          center: [lerp(from.center[0], origin[0], t), lerp(from.center[1], origin[1], t)],
+          zoom: lerp(from.zoom, zNear, t),
+        });
+      } else if (phase === "ring") {
+        const t = easeInOut(clamp01((p - FADE_END) / (1 - FADE_END)));
+        map.jumpTo({ center: origin, zoom: lerp(zNear, zAll, t) });
+      } else {
+        map.jumpTo({ center: origin, zoom: zNear }); // near + fade hold the ≤11 fit
+      }
     }
   }, []);
 
-  // Smoothly ease the rendered progress toward the scroll target, so coarse
-  // mouse-wheel steps still scrub fluidly. Loop runs only while catching up.
-  const kick = useCallback(() => {
-    if (rafRef.current != null) return;
-    const tick = () => {
-      const target = targetPRef.current;
-      const cur = curPRef.current;
-      const next = Math.abs(target - cur) < 0.0008 ? target : cur + (target - cur) * 0.18;
-      curPRef.current = next;
-      scrub(next);
-      if (next === target) {
-        rafRef.current = null;
-      } else {
-        rafRef.current = requestAnimationFrame(tick);
-      }
-    };
-    rafRef.current = requestAnimationFrame(tick);
-  }, [scrub]);
+  // Paint the current frame without animating (e.g. after data lands).
+  const render = useCallback(() => scrub(curPRef.current), [scrub]);
 
-  // Decode trips once routes arrive, then render the current frame.
+  // Animate the timeline from its current point to `target` over `dur` ms.
+  const tweenTo = useCallback(
+    (target: number, dur: number, onDone?: () => void) => {
+      if (animRef.current != null) cancelAnimationFrame(animRef.current);
+      const from = curPRef.current;
+      const t0 = performance.now();
+      const tick = (now: number) => {
+        const k = dur <= 0 ? 1 : clamp01((now - t0) / dur);
+        curPRef.current = from + (target - from) * easeInOut(k);
+        scrub(curPRef.current);
+        if (k < 1) {
+          animRef.current = requestAnimationFrame(tick);
+        } else {
+          animRef.current = null;
+          curPRef.current = target;
+          scrub(target);
+          onDone?.();
+        }
+      };
+      animRef.current = requestAnimationFrame(tick);
+    },
+    [scrub],
+  );
+
+  // --- step navigation ----------------------------------------------------
+  const goToStep = useCallback(
+    (i: number) => {
+      stepRef.current = i;
+      setStep(i);
+      tweenTo(STEPS[i].p, STEPS[i].dur);
+    },
+    [tweenTo],
+  );
+
+  // Rewind the whole story and return to the pickable intro field.
+  const deselect = useCallback(() => {
+    stepRef.current = -1;
+    setStep(-1);
+    tweenTo(0, 1200, () => {
+      setSelected(null);
+      selectedRef.current = null; // immediate, so render() clears the dot filter
+      startedRef.current = false;
+      appliedRef.current = false;
+      tripsRef.current?.clear();
+      render(); // no origin → unfilter the field + reset the camera
+      waveRef.current?.reset();
+      waveRef.current?.appearAll(FULL_VIEW.center);
+      waveRef.current?.start();
+      setInteractive(true); // intro is explorable again
+    });
+  }, [tweenTo, render]);
+
+  const next = useCallback(() => {
+    if (stepRef.current < STEPS.length - 1) goToStep(stepRef.current + 1);
+  }, [goToStep]);
+
+  const back = useCallback(() => {
+    if (stepRef.current > 0) goToStep(stepRef.current - 1);
+    else deselect();
+  }, [goToStep, deselect]);
+
+  // Once routes for the pick arrive, draw them and play fly-in + the ≤11 draw.
   useEffect(() => {
-    if (routesReady && routes) tripsRef.current?.show(routes);
-    kick();
+    if (!(routesReady && routes && selectedRef.current)) return;
+    tripsRef.current?.show(routes);
+    if (startedRef.current) {
+      render(); // already mid-story; just repaint with the new data
+      return;
+    }
+    startedRef.current = true;
+    stepRef.current = 0;
+    setStep(0);
+    curPRef.current = 0;
+    tweenTo(STEPS[0].p, STEPS[0].dur);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [routesReady, routes]);
-
-  // Scroll position sets the target; the easing loop catches up to it.
-  useEffect(() => {
-    const onScroll = () => {
-      const max = document.documentElement.scrollHeight - window.innerHeight;
-      targetPRef.current = max > 0 ? clamp01(window.scrollY / max) : 0;
-      kick();
-    };
-    window.addEventListener("scroll", onScroll, { passive: true });
-    onScroll();
-    return () => {
-      window.removeEventListener("scroll", onScroll);
-      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
-    };
-  }, [kick]);
 
   const counts = reach
     ? { 11: reach.near.length, 45: reach.near.length + reach.ring.length }
     : null;
-  const showIntro = phase === "intro" || phase === "zoom";
+  const lastStep = STEPS.length - 1;
 
   return (
     <>
-      {/* Pinned map: stays in place while the page scrolls. */}
+      {/* Full-screen map behind everything. */}
       <div className="fixed inset-0">
         <div ref={containerRef} className="h-full w-full" />
 
@@ -363,46 +456,47 @@ export default function Map() {
             ))}
           </div>
         </div>
-
-        {/* Phase captions (crossfade) */}
-        <div className="pointer-events-none absolute inset-x-0 bottom-20 flex justify-center px-4">
-          <div className="relative h-24 w-full max-w-2xl">
-            <Caption active={showIntro}>
-              <span className="block text-2xl font-semibold text-gray-900">
-                Where can a Citi Bike take you?
-              </span>
-              <span className="mt-2 block text-base text-gray-600">
-                Scroll to ride out from {selected?.name ?? "this station"}.
-              </span>
-            </Caption>
-            <Caption active={phase === "near"}>
-              <span className="block text-2xl font-semibold text-gray-900">
-                How far does a $3 Citi bike ride take you today?
-              </span>
-            </Caption>
-            <Caption active={phase === "ring"}>
-              <span className="block text-2xl font-semibold text-gray-900">
-                And if 45 minute rides were capped at $3?
-              </span>
-            </Caption>
-          </div>
-        </div>
       </div>
 
-      {/* Scroll track: gives the page height so the wheel scrubs the phases. */}
-      <div aria-hidden style={{ height: `${SCROLL_VH}vh` }} />
-    </>
-  );
-}
+      {/* Intro prompt — shown until a station is picked. */}
+      {!selected && (
+        <div className="pointer-events-none fixed inset-x-0 top-24 flex justify-center px-4">
+          <div className="max-w-xl rounded-xl bg-white/85 px-6 py-4 text-center shadow-lg backdrop-blur">
+            <span className="block text-2xl font-semibold text-gray-900">
+              Where can a Citi Bike take you?
+            </span>
+            <span className="mt-2 block text-base text-gray-600">
+              Click any station to ride out from it.
+            </span>
+          </div>
+        </div>
+      )}
 
-function Caption({ active, children }: { active: boolean; children: ReactNode }) {
-  return (
-    <div
-      className={`absolute inset-x-0 bottom-0 rounded-xl bg-white/85 px-6 py-4 text-center shadow-lg backdrop-blur transition-opacity duration-500 ${
-        active ? "opacity-100" : "opacity-0"
-      }`}
-    >
-      {children}
-    </div>
+      {/* Step caption + prev/next controls — shown while a station is active. */}
+      {selected && step >= 0 && (
+        <div className="fixed inset-x-0 bottom-8 flex flex-col items-center gap-4 px-4">
+          <div className="pointer-events-none max-w-2xl rounded-xl bg-white/85 px-6 py-4 text-center shadow-lg backdrop-blur">
+            <span className="block text-2xl font-semibold text-gray-900">
+              {STEPS[step].title}
+            </span>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={back}
+              className="rounded-full bg-white/90 px-5 py-2 text-sm font-medium text-gray-900 shadow-lg backdrop-blur hover:bg-white"
+            >
+              {step === 0 ? "↺ Pick another" : "‹ Back"}
+            </button>
+            <button
+              onClick={next}
+              disabled={step === lastStep}
+              className="rounded-full bg-gray-900 px-5 py-2 text-sm font-medium text-white shadow-lg hover:bg-gray-700 disabled:opacity-40"
+            >
+              Next ›
+            </button>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
