@@ -174,7 +174,8 @@ function staggerByDistance(trips: Trip[], origin: [number, number]) {
   const spread = maxDur * SPREAD_FRAC;
   for (const t of trips) {
     const start = (dist(t) / maxDist) * spread;
-    if (start) for (let i = 0; i < t.timestamps.length; i++) t.timestamps[i] += start;
+    if (start)
+      for (let i = 0; i < t.timestamps.length; i++) t.timestamps[i] += start;
   }
 }
 
@@ -216,9 +217,7 @@ export class TripLines {
       .map((dest) => decode(dest, routes["11"][dest], COLOR_NEAR, 0))
       .filter((t): t is Trip => t !== null);
     this.allTrips = Object.keys(routes["45"])
-      .map((dest) =>
-        decode(dest, routes["45"][dest], near.has(dest) ? COLOR_NEAR : COLOR_ALL, 0),
-      )
+      .map((dest) => decode(dest, routes["45"][dest], COLOR_ALL, 0))
       .filter((t): t is Trip => t !== null);
 
     this.origin = routes.origin;

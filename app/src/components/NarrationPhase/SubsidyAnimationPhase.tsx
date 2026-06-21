@@ -11,9 +11,8 @@ export default function SelectedPhase() {
   if (!selected) return null;
   return (
     <div className="selected-phase">
-      <h2>{selected.name}</h2>
-      <p>Station ID: {selected.id}</p>
-      <p>Now let's try the 45 min subsidy.</p>
+      <h2 className="font-bold text-2xl">{selected.name}</h2> 
+      <p>How far can $3 get you with a subsidy for trips under 45 min?</p>
       <button
         onClick={() => {
           setIsAnimating(true);
