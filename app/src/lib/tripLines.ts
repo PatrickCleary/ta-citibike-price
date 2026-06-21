@@ -1,7 +1,7 @@
 // Animated routed-trip lines, drawn with deck.gl over the MapLibre map.
 //
 // On selection we decode the origin station's per-destination polylines and
-// split them into two tiers (≤11 min and the 11–45 min ring). Each vertex
+// split them into two tiers (≤11 min and the <45 min ). Each vertex
 // carries a timestamp = the ride time to reach it at a constant 11.2 mph. The
 // two tiers are driven INDEPENDENTLY via setTiers(): the phase sequence scrubs
 // the ≤11 set first, then fades it back and draws the full ≤45 set on top.
@@ -16,21 +16,23 @@ import { ScatterplotLayer } from "@deck.gl/layers";
 import polyline from "@mapbox/polyline";
 import type { Map } from "maplibre-gl";
 import type { Routes } from "./trips";
-import { STATIONS_LAYER } from "./stationWave";
+import type { StepKey } from "./store";
+import { STATIONS_LAYER } from "./dockController";
 
 const COLOR_NEAR: [number, number, number] = [16, 185, 129]; // ≤11 min — emerald
-export const COLOR_RING: [number, number, number] = [99, 102, 241]; // 11–45 min — indigo
+export const COLOR_ALL: [number, number, number] = [99, 102, 241]; // 11–45 min — indigo
 
 // Ride speed used to convert route distance into ride time.
 const SPEED_MPS = (11.2 * 1609.344) / 3600; // 11.2 mph ≈ 5.01 m/s
 // Maps wall-ms to ride-seconds for the dock plop curve (progress drives the rest).
 const PLAYBACK = 600;
-// Random per-trip departure stagger so they don't all leave at once.
-const JITTER_MS = 500;
-const JITTER_RIDE = (JITTER_MS / 1000) * PLAYBACK;
+// Departure stagger: trips leave in order of straight-line distance from the
+// origin (nearest first), spread across this fraction of the tier's slowest
+// route duration. Produces a radial ripple; arrivals are not synced.
+const SPREAD_FRAC = 0.5;
 
 const TRIP_NEAR = "trip-near";
-const TRIP_RING = "trip-ring";
+const TRIP_ALL = "trip-all";
 const HEAD_LAYER = "trip-heads";
 
 const TRAVEL_R = 3; // px — bead riding the head of a drawing line
@@ -61,6 +63,34 @@ export interface TierState {
 }
 
 const HIDDEN: TierState = { visible: false, progress: 0, opacity: 1 };
+
+// The "near" step plays in two beats: the first FLY fraction of t is a lead-in
+// (lines still hidden), the rest draws the ≤11 trips out.
+const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x);
+
+// The trip-line story is a pure function of (step, local progress t ∈ [0,1]):
+// step "near" draws the ≤11 set out, "fade" fades it back, "all" redraws it in
+// all-blue alongside the full <45 set. Returns the two tier states to feed
+// setTiers — all camera/dock concerns live elsewhere.
+export function tiersForPhase(
+  phase: StepKey,
+  t: number,
+): { near: TierState; all: TierState } {
+  if (phase === "near") {
+    const np = clamp01(t);
+    return { near: { visible: true, progress: np, opacity: 1 }, all: HIDDEN };
+  }
+  if (phase === "fade") {
+    return {
+      near: { visible: true, progress: 1, opacity: 1 - t },
+      all: HIDDEN,
+    };
+  }
+  return {
+    near: { visible: true, progress: t, opacity: 1, color: COLOR_ALL },
+    all: { visible: true, progress: t, opacity: 1 },
+  };
+}
 
 // Interpolated [lng, lat] along a trip at ride-time `t`.
 function positionAt(trip: Trip, t: number): [number, number] {
@@ -104,15 +134,15 @@ function decode(
   id: string,
   poly: string,
   color: [number, number, number],
-  jitter: number,
+  start: number,
 ): Trip | null {
   // polyline.decode → [[lat, lng], ...]; deck wants [lng, lat].
   const path = polyline
     .decode(poly, 5)
     .map(([lat, lng]) => [lng, lat] as [number, number]);
   if (path.length < 2) return null;
-  // timestamps are ride-seconds at SPEED_MPS (cumulative), offset by jitter.
-  const timestamps = [jitter];
+  // timestamps are ride-seconds at SPEED_MPS (cumulative), offset by start.
+  const timestamps = [start];
   for (let i = 1; i < path.length; i++) {
     timestamps.push(
       timestamps[i - 1] + meters(path[i - 1], path[i]) / SPEED_MPS,
@@ -130,16 +160,31 @@ function endTimeOf(trips: Trip[]): number {
   return maxTime + (PLOP_MS / 1000) * PLAYBACK;
 }
 
+// Push each trip's departure later in proportion to its straight-line distance
+// from the origin, so trips ripple outward nearest-first. The offset is added to
+// every timestamp (start = timestamps[0]); the farthest leaves at
+// SPREAD_FRAC * the tier's slowest route duration. Mutates `trips` in place.
+function staggerByDistance(trips: Trip[], origin: [number, number]) {
+  const dist = (t: Trip) => meters(origin, t.path[t.path.length - 1]);
+  const maxDist = trips.reduce((m, t) => Math.max(m, dist(t)), 0) || 1;
+  const maxDur = trips.reduce(
+    (m, t) => Math.max(m, t.timestamps[t.timestamps.length - 1]),
+    0,
+  );
+  const spread = maxDur * SPREAD_FRAC;
+  for (const t of trips) {
+    const start = (dist(t) / maxDist) * spread;
+    if (start) for (let i = 0; i < t.timestamps.length; i++) t.timestamps[i] += start;
+  }
+}
+
 export class TripLines {
   private overlay: MapboxOverlay;
   private nearTrips: Trip[] = [];
-  private ringTrips: Trip[] = [];
+  private allTrips: Trip[] = [];
   private nearEnd = 1;
-  private ringEnd = 1;
+  private allEnd = 1;
   private origin: [number, number] | null = null; // [lng, lat]
-  private drawnRadius = 0; // metres from origin to the furthest drawn head
-  private nearRadius = 0; // metres to the furthest ≤11-min destination (final)
-  private allRadius = 0; // metres to the furthest ≤45-min destination (final)
   private map: Map;
 
   constructor(map: Map) {
@@ -156,53 +201,78 @@ export class TripLines {
   getOrigin(): [number, number] | null {
     return this.origin;
   }
-  getDrawnRadius(): number {
-    return this.drawnRadius;
-  }
-  // Final extent of a tier (metres from origin to its furthest destination),
-  // independent of draw progress — used to frame a steady camera per phase.
-  getNearRadius(): number {
-    return this.nearRadius;
-  }
-  getAllRadius(): number {
-    return this.allRadius;
+
+  // Total ride-seconds for a phase's draw-out (departure stagger + travel +
+  // dock-plop tail). Drives constant-bike-speed playback in StoryController.
+  rideSecondsFor(phase: StepKey): number {
+    return phase === "near" ? this.nearEnd : this.allEnd;
   }
 
-  // Decode a station's routes into the two tiers. The ring is the 11–45 min
+  // Decode a station's routes into the two tiers. The all tier is the <45 min
   // band; the ≤11 set is its own tier (and stays its colour throughout).
   show(routes: Routes) {
     const near = new Set(Object.keys(routes["11"]));
-    this.nearTrips = [];
-    this.ringTrips = [];
-    for (const [dest, poly] of Object.entries(routes["45"])) {
-      const isNear = near.has(dest);
-      const t = decode(
-        dest,
-        poly,
-        isNear ? COLOR_NEAR : COLOR_RING,
-        Math.random() * JITTER_RIDE,
-      );
-      if (!t) continue;
-      (isNear ? this.nearTrips : this.ringTrips).push(t);
-    }
-    this.origin = routes.origin;
-    this.nearEnd = endTimeOf(this.nearTrips);
-    this.ringEnd = endTimeOf(this.ringTrips);
+    this.nearTrips = Object.keys(routes["11"])
+      .map((dest) => decode(dest, routes["11"][dest], COLOR_NEAR, 0))
+      .filter((t): t is Trip => t !== null);
+    this.allTrips = Object.keys(routes["45"])
+      .map((dest) =>
+        decode(dest, routes["45"][dest], near.has(dest) ? COLOR_NEAR : COLOR_ALL, 0),
+      )
+      .filter((t): t is Trip => t !== null);
 
-    // Final tier extents: furthest destination (last path vertex) per tier.
-    const o = this.origin;
-    const reach = (trips: Trip[]) =>
-      trips.reduce((m, t) => Math.max(m, meters(o, t.path[t.path.length - 1])), 0);
-    this.nearRadius = reach(this.nearTrips);
-    this.allRadius = Math.max(this.nearRadius, reach(this.ringTrips));
+    this.origin = routes.origin;
+    staggerByDistance(this.nearTrips, this.origin);
+    staggerByDistance(this.allTrips, this.origin);
+    this.nearEnd = endTimeOf(this.nearTrips);
+    this.allEnd = endTimeOf(this.allTrips);
 
     this.setTiers(HIDDEN, HIDDEN);
   }
 
-  // Drive the two tiers. Called every scroll frame by the phase sequence.
-  setTiers(near: TierState, ring: TierState) {
+  // Drive the two tiers. Called every frame by the phase sequence.
+  setTiers(near: TierState, all: TierState) {
     const heads: Head[] = [];
-    let maxR = 0;
+    const currentBounds = this.map.getBounds().toArray();
+    const maxBounds: [[number, number], [number, number]] = [
+      [...currentBounds[0]] as [number, number],
+      [...currentBounds[1]] as [number, number],
+    ];
+    let boundsExpanded = false;
+    // Extent of the trip points alone (separate from the viewport union above):
+    // it's static within a phase and only grows when the all-tier draws, so it's
+    // the right thing to guard the camera fit on.
+    let content: [[number, number], [number, number]] | null = null;
+
+    const includePointInMaxBounds = (p: [number, number]) => {
+      if (p[0] < maxBounds[0][0]) {
+        maxBounds[0][0] = p[0];
+        boundsExpanded = true;
+      }
+      if (p[1] < maxBounds[0][1]) {
+        maxBounds[0][1] = p[1];
+        boundsExpanded = true;
+      }
+      if (p[0] > maxBounds[1][0]) {
+        maxBounds[1][0] = p[0];
+        boundsExpanded = true;
+      }
+      if (p[1] > maxBounds[1][1]) {
+        maxBounds[1][1] = p[1];
+        boundsExpanded = true;
+      }
+      if (!content) {
+        content = [
+          [p[0], p[1]],
+          [p[0], p[1]],
+        ];
+      } else {
+        if (p[0] < content[0][0]) content[0][0] = p[0];
+        if (p[1] < content[0][1]) content[0][1] = p[1];
+        if (p[0] > content[1][0]) content[1][0] = p[0];
+        if (p[1] > content[1][1]) content[1][1] = p[1];
+      }
+    };
 
     const build = (trips: Trip[], end: number, tier: TierState) => {
       if (!tier.visible) return;
@@ -218,6 +288,8 @@ export class TripLines {
         let line: [number, number, number, number];
         if (time < arrival) {
           pos = positionAt(t, time);
+          includePointInMaxBounds(pos);
+
           radius = TRAVEL_R;
           fill = [...WHITE, alpha];
           line = [...col, alpha];
@@ -225,18 +297,29 @@ export class TripLines {
           const plopMs = ((time - arrival) / PLAYBACK) * 1000;
           radius = DOCK_R * overshoot(Math.min(plopMs / PLOP_MS, 1));
           pos = t.path[t.path.length - 1];
+          includePointInMaxBounds(pos);
+
           fill = [...col, alpha];
           line = [...WHITE, alpha];
         }
         heads.push({ position: pos, radius, fill, line });
-        if (this.origin) maxR = Math.max(maxR, meters(this.origin, pos));
       }
     };
 
     build(this.nearTrips, this.nearEnd, near);
-    build(this.ringTrips, this.ringEnd, ring);
+    build(this.allTrips, this.allEnd, all);
 
-    this.drawnRadius = maxR;
+    // When the trips fall outside the current view, ease the camera to frame
+    // them — but only when the content has grown past what we last framed, so the
+    // ease isn't retriggered every frame while it's still in flight (or once the
+    // user has panned).
+    if (boundsExpanded && content) {
+      this.map.fitBounds(content, {
+        padding: 100,
+        duration: 500,
+        easing: (t) => t, // linear so the ease doesn't fight the per-frame paints
+      });
+    }
 
     const beforeId = this.beforeId();
     const tripLayer = (
@@ -268,9 +351,9 @@ export class TripLines {
 
     this.overlay.setProps({
       layers: [
-        // near under ring so the 45-min set overlays the faded 11-min set
+        // near under all so the 45-min set overlays the faded 11-min set
         tripLayer(TRIP_NEAR, this.nearTrips, this.nearEnd, near),
-        tripLayer(TRIP_RING, this.ringTrips, this.ringEnd, ring),
+        tripLayer(TRIP_ALL, this.allTrips, this.allEnd, all),
         new ScatterplotLayer<Head>({
           id: HEAD_LAYER,
           data: heads,
@@ -292,8 +375,7 @@ export class TripLines {
 
   clear() {
     this.nearTrips = [];
-    this.ringTrips = [];
-    this.drawnRadius = 0;
+    this.allTrips = [];
     this.overlay.setProps({ layers: [] });
   }
 

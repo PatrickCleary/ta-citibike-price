@@ -1,6 +1,12 @@
-// Station "plop-in" wave animation for the map.
+// Dock layer controller for the map.
 //
-// On selection, every station gets per-feature animation values baked into
+// Owns everything about the dock (station) circle layer: its paint, the
+// "plop-in" wave animation, and per-dock highlighting. The idea is that all
+// dock-level map behaviour lives behind this one controller — today that's the
+// wave + selection styling; tooltips/hover cards are the natural next thing to
+// add here (see the EXTENSION POINT note near the bottom).
+//
+// On selection, every dock gets per-feature animation values baked into
 // MapLibre feature-state (color, target opacity, base size, stroke, and a
 // distance-based `delay`). A single requestAnimationFrame loop then sweeps a
 // global `time` past those delays; the paint expressions below turn that into
@@ -20,6 +26,9 @@ const SELECTED_COLOR = "#ff2d55";
 const BASE_COLOR = "#1f2937";
 const COLOR_NEAR = CONTOURS[0].color; // ≤11 min — emerald
 const COLOR_RING = CONTOURS[1].color; // 11–45 min — indigo
+
+// Reused empty set for selections that show no tiers (a plain highlight).
+const EMPTY: Set<string> = new Set();
 
 // WAVE_MS: how long the ripple takes to sweep the whole map (the farthest
 // station starts plopping at WAVE_MS). FADE_MS: each dot's own plop duration.
@@ -99,7 +108,7 @@ export function stationPaint(): CircleLayerSpecification["paint"] {
   };
 }
 
-export class StationWave {
+export class DockController {
   private map: Map;
   private stations: StationPoint[] = [];
   private byId = new globalThis.Map<string, StationPoint>();
@@ -114,6 +123,24 @@ export class StationWave {
   setStations(list: StationPoint[]) {
     this.stations = list;
     this.byId = new globalThis.Map(list.map((s) => [s.id, s]));
+  }
+
+  // Highlight a single dock: paint it red at full opacity and fade the rest of
+  // the field down to 0.15 (no tiers shown). This is the plain "I clicked a
+  // dock" styling; use `select` directly when you also need near/ring tiers.
+  //
+  // `wave` (default true) plays the ripple as the field re-settles; pass false
+  // to snap straight to the highlighted look.
+  selectDock(dockId: string, { wave = true }: { wave?: boolean } = {}) {
+    this.select({
+      selectedId: dockId,
+      near: EMPTY,
+      ring: EMPTY,
+      showNear: false,
+      showRing: false,
+    });
+    // if (wave) this.start();
+    // else this.refresh();
   }
 
   // Bake each station's target look + appearance delay into feature-state.
@@ -224,6 +251,12 @@ export class StationWave {
     if (this.raf != null) cancelAnimationFrame(this.raf);
     this.raf = null;
   }
+
+  // --- EXTENSION POINT ----------------------------------------------------
+  // Future dock-level UI (hover tooltips / selected-dock cards) belongs here:
+  // this controller already owns the layer id, the id→point lookup (`byId`),
+  // and the selection state, so tooltip show/hide/position methods would have
+  // everything they need without the React component reaching into the map.
 
   private applyAnim(time: number) {
     if (!this.map.getLayer(STATIONS_LAYER)) return;
