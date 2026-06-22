@@ -225,8 +225,8 @@ export class TripLines {
       .filter((t): t is Trip => t !== null);
 
     this.origin = routes.origin;
-    staggerByDistance(this.nearTrips, this.origin);
-    staggerByDistance(this.allTrips, this.origin);
+    // staggerByDistance(this.nearTrips, this.origin);
+    // staggerByDistance(this.allTrips, this.origin);
     this.nearEnd = endTimeOf(this.nearTrips);
     this.allEnd = endTimeOf(this.allTrips);
 
@@ -338,7 +338,7 @@ export class TripLines {
         getTimestamps: (d) => d.timestamps,
         getColor: (d) => tier.color ?? d.color,
         updateTriggers: { getColor: tier.color?.join() ?? "self" },
-        getWidth: 2,
+        getWidth: 4,
         widthUnits: "pixels",
         widthMinPixels: 2.5,
         capRounded: true,
