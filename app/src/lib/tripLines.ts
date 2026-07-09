@@ -191,6 +191,10 @@ export class TripLines {
   private allEnd = 1;
   private origin: [number, number] | null = null; // [lng, lat]
   private map: Map;
+  // Accumulated geographic extent of the drawn trip points. Only ever unions in
+  // new points (never shrinks within a draw), so the camera eases strictly
+  // outward and can't wobble back in. Reset on show()/clear().
+  private pointBounds: [[number, number], [number, number]] | null = null;
 
   constructor(map: Map) {
     this.map = map;
@@ -229,6 +233,7 @@ export class TripLines {
     // staggerByDistance(this.allTrips, this.origin);
     this.nearEnd = endTimeOf(this.nearTrips);
     this.allEnd = endTimeOf(this.allTrips);
+    this.pointBounds = null;
 
     this.setTiers(HIDDEN, HIDDEN);
   }
@@ -236,45 +241,22 @@ export class TripLines {
   // Drive the two tiers. Called every frame by the phase sequence.
   setTiers(near: TierState, all: TierState) {
     const heads: Head[] = [];
-    const currentBounds = this.map.getBounds().toArray();
-    const maxBounds: [[number, number], [number, number]] = [
-      [...currentBounds[0]] as [number, number],
-      [...currentBounds[1]] as [number, number],
-    ];
-    let boundsExpanded = false;
-    // Extent of the trip points alone (separate from the viewport union above):
-    // it's static within a phase and only grows when the all-tier draws, so it's
-    // the right thing to guard the camera fit on.
-    let content: [[number, number], [number, number]] | null = null;
 
-    const includePointInMaxBounds = (p: [number, number]) => {
-      if (p[0] < maxBounds[0][0]) {
-        maxBounds[0][0] = p[0];
-        boundsExpanded = true;
-      }
-      if (p[1] < maxBounds[0][1]) {
-        maxBounds[0][1] = p[1];
-        boundsExpanded = true;
-      }
-      if (p[0] > maxBounds[1][0]) {
-        maxBounds[1][0] = p[0];
-        boundsExpanded = true;
-      }
-      if (p[1] > maxBounds[1][1]) {
-        maxBounds[1][1] = p[1];
-        boundsExpanded = true;
-      }
-      if (!content) {
-        content = [
+    // Union each drawn point into the accumulated extent (monotonic — never
+    // shrinks within a draw), so the camera below only ever eases outward.
+    const includePoint = (p: [number, number]) => {
+      if (!this.pointBounds) {
+        this.pointBounds = [
           [p[0], p[1]],
           [p[0], p[1]],
         ];
-      } else {
-        if (p[0] < content[0][0]) content[0][0] = p[0];
-        if (p[1] < content[0][1]) content[0][1] = p[1];
-        if (p[0] > content[1][0]) content[1][0] = p[0];
-        if (p[1] > content[1][1]) content[1][1] = p[1];
+        return;
       }
+      const b = this.pointBounds;
+      if (p[0] < b[0][0]) b[0][0] = p[0];
+      if (p[1] < b[0][1]) b[0][1] = p[1];
+      if (p[0] > b[1][0]) b[1][0] = p[0];
+      if (p[1] > b[1][1]) b[1][1] = p[1];
     };
 
     const build = (trips: Trip[], end: number, tier: TierState) => {
@@ -291,7 +273,7 @@ export class TripLines {
         let line: [number, number, number, number];
         if (time < arrival) {
           pos = positionAt(t, time);
-          includePointInMaxBounds(pos);
+          includePoint(pos);
 
           radius = TRAVEL_R;
           fill = [...WHITE, alpha];
@@ -300,7 +282,7 @@ export class TripLines {
           const plopMs = ((time - arrival) / PLAYBACK) * 1000;
           radius = DOCK_R * overshoot(Math.min(plopMs / PLOP_MS, 1));
           pos = t.path[t.path.length - 1];
-          includePointInMaxBounds(pos);
+          includePoint(pos);
 
           fill = [...col, alpha];
           line = [...WHITE, alpha];
@@ -312,15 +294,14 @@ export class TripLines {
     build(this.nearTrips, this.nearEnd, near);
     build(this.allTrips, this.allEnd, all);
 
-    // When the trips fall outside the current view, ease the camera to frame
-    // them — but only when the content has grown past what we last framed, so the
-    // ease isn't retriggered every frame while it's still in flight (or once the
-    // user has panned).
-    if (boundsExpanded && content) {
-      this.map.fitBounds(content, {
-        padding: 100,
-        duration: 500,
-        easing: (t) => t, // linear so the ease doesn't fight the per-frame paints
+    // Continuously frame the accumulated point extent. Because pointBounds only
+    // grows, the camera zooms strictly outward as the lines draw; duration 0
+    // means each frame's paint carries the motion (no easing to fight the
+    // per-frame updates).
+    if (this.pointBounds) {
+      this.map.fitBounds(this.pointBounds, {
+        padding: 10,
+        duration: 0,
       });
     }
 
@@ -379,6 +360,7 @@ export class TripLines {
   clear() {
     this.nearTrips = [];
     this.allTrips = [];
+    this.pointBounds = null;
     this.overlay.setProps({ layers: [] });
   }
 
