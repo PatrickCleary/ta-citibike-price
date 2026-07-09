@@ -1,25 +1,23 @@
-// Drives the narrated trip-line story: an imperative rAF loop that tweens a
-// step's local progress t ∈ [0,1] and paints each frame. The sibling of
-// DockController / TripLines — it owns the animation clock and is triggered
-// imperatively (e.g. from UI buttons via playStep), not bound to store phases.
+// Drives the narrated trip-line story as a set of discrete, independently
+// re-enterable steps — NOT a scrubbable timeline. The sibling of DockController
+// / TripLines: it owns the animation clock and is triggered imperatively from
+// the UI (playNear / playFar), while the static resting frames (showIntro /
+// showOrigin / holdNear / holdFar) are painted when the store lands on a step.
 //
-// A "frame" is: isolate the picked origin dot, apply origin styling once, and
-// set the two trip-line tiers via tiersForPhase. With no station picked it
-// paints the intro (full field, full-metro camera, no trips).
+// Each draw-out step still has a private 0→1 progress clock (the bead's position
+// is a function of it), but that `t` is never addressed from outside — you only
+// ever play a step forward or paint its resting frame.
 
 import type maplibregl from "maplibre-gl";
 import { DockController, STATIONS_LAYER } from "./dockController";
-import { TripLines, tiersForPhase, type TierState } from "./tripLines";
-import { STEPS, LAST_STEP, PLAYBACK_SPEEDUP, type StepKey } from "./store";
+import { TripLines, tiersForPhase } from "./tripLines";
+import { PLAYBACK_SPEEDUP, type StepKey } from "./store";
 import { FULL_VIEW } from "./constants";
 
 const EMPTY: Set<string> = new Set();
-const HIDDEN: TierState = { visible: false, progress: 0, opacity: 1 };
 
 const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x);
 const linear = (t: number) => t; // constant speed — for bike-speed draw-out
-const easeInOut = (t: number) =>
-  t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
 
 export class StoryController {
   private raf: number | null = null;
@@ -33,47 +31,49 @@ export class StoryController {
     private selectedId: () => string | null,
   ) {}
 
-  // Trigger a named step (e.g. from a UI button). Steps with a fixed `dur` use
-  // it (eased); `dur: null` steps play at constant bike speed — duration derived
-  // from the route distances, scrubbed linearly so the bead's speed is constant.
-  playStep(key: StepKey, onDone?: () => void) {
-    const idx = STEPS.findIndex((s) => s.key === key);
-    if (idx < 0) return;
-    const fixed = STEPS[idx].dur;
-    const dur =
-      fixed ?? (this.trips.rideSecondsFor(key) * 1000) / PLAYBACK_SPEEDUP;
-    this.play(idx, dur, onDone, fixed == null ? linear : easeInOut);
-  }
+  // ── Static resting frames (painted when the store lands on a step) ──────────
 
-  // Tween `step`'s local progress 0→1 over `dur` ms, painting each frame.
-  play(
-    step: number,
-    dur: number,
-    onDone?: () => void,
-    ease: (t: number) => number = easeInOut,
-  ) {
+  // Intro: no station picked → full field, full-metro camera, no trips.
+  showIntro() {
     this.stop();
-    // Kill any in-flight MapLibre camera animation (scroll-zoom easing / drag
-    // inertia from the intro) so it can't fight our per-frame paints.
-    this.map.stop();
-    const t0 = performance.now();
-    const tick = (now: number) => {
-      const k = dur <= 0 ? 1 : clamp01((now - t0) / dur);
-      this.scrub(step, ease(k));
-      if (k < 1) {
-        this.raf = requestAnimationFrame(tick);
-      } else {
-        this.raf = null;
-        this.scrub(step, 1);
-        onDone?.();
-      }
-    };
-    this.raf = requestAnimationFrame(tick);
+    this.isolateOrigin(null);
+    this.trips.setTiers({ visible: false, progress: 0, opacity: 1 }, { visible: false, progress: 0, opacity: 1 });
+    this.map.jumpTo({ center: FULL_VIEW.center, zoom: FULL_VIEW.zoom });
   }
 
-  // Paint a single static frame (the intro, or holding a step at progress t).
-  paint(step: number, t: number) {
-    this.scrub(step, t);
+  // Step 1 (selected): isolate + style the picked origin, no trips yet. Leaves
+  // the camera alone so the selection flyTo (mapControl) can run uninterrupted.
+  showOrigin() {
+    this.stop();
+    if (!this.hasOrigin()) return this.showIntro();
+    this.renderStep("near", 0, { hideTrips: true });
+  }
+
+  // Step 2/3 resting frames: the draw-out held at its end (progress 1). Static —
+  // the camera stays wherever it is (no auto-fit), so re-entering a step via the
+  // reset-to-any-step controls doesn't lurch.
+  holdNear() {
+    this.stop();
+    if (!this.hasOrigin()) return this.showIntro();
+    this.renderStep("near", 1);
+  }
+
+  holdFar() {
+    this.stop();
+    if (!this.hasOrigin()) return this.showIntro();
+    this.renderStep("far", 1);
+  }
+
+  // ── Draw-out animations (triggered by the UI's play buttons) ────────────────
+
+  // Step 2: draw the ≤11 set out at constant bike speed, then hold.
+  playNear(onDone?: () => void) {
+    this.play("near", onDone);
+  }
+
+  // Step 3: draw the full ≤45 set out (all-blue) at constant bike speed.
+  playFar(onDone?: () => void) {
+    this.play("far", onDone);
   }
 
   stop() {
@@ -81,6 +81,7 @@ export class StoryController {
       cancelAnimationFrame(this.raf);
       this.raf = null;
     }
+    this.trips.endAutoFit();
   }
 
   // Clear the per-pick latch so the next pick re-applies origin styling.
@@ -92,49 +93,86 @@ export class StoryController {
     this.stop();
   }
 
-  private scrub(step: number, t: number) {
-    const map = this.map;
-    const id = this.selectedId();
-    const origin = id ? this.originFor(id) : null;
+  // ── internals ───────────────────────────────────────────────────────────────
 
-    // Isolate the origin dot once a station is picked; show the full field in
-    // the intro so any station stays clickable.
-    if (map.getLayer(STATIONS_LAYER)) {
-      const want = origin ? id : null;
-      const cur = map.getFilter(STATIONS_LAYER) as unknown[] | undefined;
-      const curId = Array.isArray(cur) ? (cur[2] as string) : null;
-      if (want !== curId) {
-        map.setFilter(
-          STATIONS_LAYER,
-          want ? ["==", ["get", "station_id"], want] : null,
-        );
+  // Tween `key`'s local progress 0→1 at constant bike speed (duration derived
+  // from the route distances), painting each frame, then hold at 1.
+  private play(key: StepKey, onDone?: () => void) {
+    this.stop();
+    if (!this.hasOrigin()) return;
+    // Kill any in-flight MapLibre camera animation (the selection flyTo, scroll
+    // easing, drag inertia) so it can't fight our per-frame paints, then take
+    // camera ownership for the draw-out.
+    this.map.stop();
+    this.trips.beginAutoFit();
+
+    const dur = (this.trips.rideSecondsFor(key) * 1000) / PLAYBACK_SPEEDUP;
+    const t0 = performance.now();
+    const tick = (now: number) => {
+      const k = dur <= 0 ? 1 : clamp01((now - t0) / dur);
+      this.renderStep(key, linear(k));
+      if (k < 1) {
+        this.raf = requestAnimationFrame(tick);
+      } else {
+        this.raf = null;
+        this.renderStep(key, 1);
+        this.trips.endAutoFit();
+        onDone?.();
       }
-    }
+    };
+    this.raf = requestAnimationFrame(tick);
+  }
 
-    // Intro: no station picked → full field, full-metro camera, no trips.
-    if (!origin) {
-      this.trips.setTiers(HIDDEN, HIDDEN);
-      map.jumpTo({ center: FULL_VIEW.center, zoom: FULL_VIEW.zoom });
+  // Paint one frame of a step: isolate + style the origin, then set the tiers for
+  // this step's progress (or hide them entirely for the pre-draw resting frame).
+  private renderStep(
+    key: StepKey,
+    t: number,
+    opts?: { hideTrips?: boolean },
+  ) {
+    const id = this.selectedId()!;
+    this.isolateOrigin(id);
+    this.ensureOriginStyling(id);
+    if (opts?.hideTrips) {
+      this.trips.setTiers({ visible: false, progress: 0, opacity: 1 }, { visible: false, progress: 0, opacity: 1 });
       return;
     }
-
-    // Origin styling: applied once per pick (red marker + a little plop).
-    if (!this.applied) {
-      this.docks.select({
-        selectedId: id!,
-        near: EMPTY,
-        ring: EMPTY,
-        showNear: true,
-        showRing: true,
-        hideOthers: true,
-      });
-      this.docks.start();
-      this.applied = true;
-    }
-
-    // Paint the two trip-line tiers for this step's local progress.
-    const idx = step < 0 ? 0 : step > LAST_STEP ? LAST_STEP : step;
-    const { near, all } = tiersForPhase(STEPS[idx].key, t);
+    const { near, all } = tiersForPhase(key, t);
     this.trips.setTiers(near, all);
+  }
+
+  private hasOrigin(): boolean {
+    const id = this.selectedId();
+    return !!(id && this.originFor(id));
+  }
+
+  // Isolate the origin dot when a station is picked (`id`); pass null to restore
+  // the full clickable field (the intro).
+  private isolateOrigin(id: string | null) {
+    if (!this.map.getLayer(STATIONS_LAYER)) return;
+    const cur = this.map.getFilter(STATIONS_LAYER) as unknown[] | undefined;
+    const curId = Array.isArray(cur) ? (cur[2] as string) : null;
+    if (id !== curId) {
+      this.map.setFilter(
+        STATIONS_LAYER,
+        id ? ["==", ["get", "station_id"], id] : null,
+      );
+    }
+  }
+
+  // Apply the red origin marker + plop once per pick (latched by `applied`,
+  // cleared by resetPick).
+  private ensureOriginStyling(id: string) {
+    if (this.applied) return;
+    this.docks.select({
+      selectedId: id,
+      near: EMPTY,
+      ring: EMPTY,
+      showNear: true,
+      showRing: true,
+      hideOthers: true,
+    });
+    this.docks.start();
+    this.applied = true;
   }
 }

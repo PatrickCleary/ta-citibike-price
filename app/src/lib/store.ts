@@ -14,80 +14,61 @@ export interface Dock {
   name: string;
 }
 
-// Narrated steps the prev/next buttons move between. `title` is the caption
-// shown on the step. `dur` is the transition length in ms, OR `null` to play at
-// constant bike speed — the draw-out steps derive their length from the route
-// distances (see PLAYBACK_SPEEDUP) so longer routes take proportionally longer.
-export const STEPS = [
-  {
-    key: "near",
-    dur: null,
-    title: "How far does a $3 Citi Bike ride take you today?",
-  },
-  { key: "fade", dur: 1400, title: "We want to subsidize it to 45 minutes." },
-  { key: "all", dur: null, title: "Here's how far $3 could take you." },
-] as const;
+// The story is four discrete, independently re-enterable steps (plus `intro`,
+// the pre-selection state). Each step owns a static resting frame; the two
+// draw-out steps (`near`, `far`) also have an animation the UI's play button
+// triggers. There is no scrubbing — you only ever play a step forward or land
+// on its resting frame (e.g. via reset-to-any-step).
+export type Phase = "intro" | "selected" | "near" | "far" | "final";
 
-// Constant-bike-speed playback: a `dur: null` step animates at this multiple of
-// real ride time (e.g. 120× → a 45-min route draws out in ~22.5s of wall clock).
+// The animated draw-out steps (the ones with a bike-speed tween).
+export type StepKey = "near" | "far";
+
+// Constant-bike-speed playback: a draw-out step animates at this multiple of
+// real ride time (e.g. 140× → a 45-min route draws out in ~19s of wall clock).
 export const PLAYBACK_SPEEDUP = 140;
 
-export type Phase =
-  | "selecting"
-  | "selected"
-  | "show_near"
-  | "fade_near"
-  | "show_far"
-  | "show_both"
-  | "cta"
-  | "reset";
-
-export const LAST_STEP = STEPS.length - 1;
-export type StepKey = (typeof STEPS)[number]["key"];
-
-// Ordered story phases the Narrator's prev/next controls step through, after a
-// station is picked. `selecting` is the intro and `reset` the teardown —
-// neither is part of this navigable sequence.
-export const PHASE_ORDER = [
-  "show_near",
-  "fade_near",
-  "show_far",
-  "show_both",
-  "cta",
+// The navigable steps prev/next move between, in order. `intro` sits before
+// this sequence (entered by clearing the selection).
+export const STEP_ORDER = [
+  "selected",
+  "near",
+  "far",
+  "final",
 ] as const satisfies readonly Phase[];
 
 interface AppState {
   /** Picked station, or null in the intro. */
   selected: Dock | null;
-  /** Pick (or clear) a station; picking enters the story at the first phase. */
+  /** Pick (or clear) a station; picking enters the story at the first step. */
   setSelected: (s: Dock | null) => void;
-  /** Current story phase; `selecting` while picking in the intro. */
+  /** Current story step; `intro` while picking in the intro. */
   phase: Phase;
+  /** Jump directly to any step (the reset-to-any-step controls use this). */
   setPhase: (p: Phase) => void;
-  /** Step forward through PHASE_ORDER (no-op at the last phase). */
+  /** Step forward through STEP_ORDER (no-op at the last step). */
   advance: () => void;
-  /** Step back through PHASE_ORDER; from the first phase, return to the intro. */
+  /** Step back through STEP_ORDER; from the first step, return to the intro. */
   back: () => void;
 }
 
 export const useApp = create<AppState>((set) => ({
   selected: null,
-  setSelected: (s) =>
-    set({ selected: s, phase: s ? PHASE_ORDER[0] : "selecting" }),
-  phase: "selecting",
+  setSelected: (s) => set({ selected: s, phase: s ? STEP_ORDER[0] : "intro" }),
+  phase: "intro",
   setPhase: (p) => set({ phase: p }),
   advance: () =>
     set((s) => {
-      const i = (PHASE_ORDER as readonly Phase[]).indexOf(s.phase);
-      return i >= 0 && i < PHASE_ORDER.length - 1
-        ? { phase: PHASE_ORDER[i + 1] }
+      const i = (STEP_ORDER as readonly Phase[]).indexOf(s.phase);
+      return i >= 0 && i < STEP_ORDER.length - 1
+        ? { phase: STEP_ORDER[i + 1] }
         : {};
     }),
   back: () =>
     set((s) => {
-      const i = (PHASE_ORDER as readonly Phase[]).indexOf(s.phase);
+      const i = (STEP_ORDER as readonly Phase[]).indexOf(s.phase);
       return i <= 0
-        ? { phase: "selecting", selected: null }
-        : { phase: PHASE_ORDER[i - 1] };
+        ? { phase: "intro", selected: null }
+        : { phase: STEP_ORDER[i - 1] };
     }),
 }));

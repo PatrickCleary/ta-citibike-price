@@ -56,6 +56,7 @@ function MapView() {
 
   // Discrete control state lives in the store; server data in react-query.
   const selected = useApp((s) => s.selected);
+  const phase = useApp((s) => s.phase);
 
   const reachQuery = useReach(selected?.id ?? null);
   const routesQuery = useRoutes(selected?.id ?? null);
@@ -132,12 +133,12 @@ function MapView() {
         paint: stationPaint(),
       });
 
-      // Pick + hover-cursor handlers, bound only while the phase is `selecting`.
+      // Pick + hover-cursor handlers, bound only while the phase is `intro`.
       unregisterHandlers = registerMapHandlers(map, selectStation);
 
       // Station layer now exists → paint the intro frame and (once stations
       // have also loaded) ripple the field in.
-      storyRef.current?.paint(0, 0);
+      storyRef.current?.showIntro();
       playIntro();
     });
 
@@ -154,18 +155,34 @@ function MapView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // New pick (or deselect) → reset the per-pick visual state so the next pick
-  // re-applies origin styling from a clean slate. Animations are triggered
-  // manually from the UI (story.playStep(...)), not from here.
+  // New pick (or deselect) → reset the per-pick latch so the next pick re-applies
+  // origin styling from a clean slate; clear the trip lines on deselect.
   useEffect(() => {
     storyRef.current?.resetPick();
-    if (selected) {
-      storyRef.current?.paint(0, 0); // isolate + style the picked origin
-    } else {
-      tripsRef.current?.clear();
-      storyRef.current?.paint(0, 0); // back to the intro frame
-    }
+    if (!selected) tripsRef.current?.clear();
   }, [selected]);
+
+  // Landing on a step paints its static resting frame. Draw-out animations are
+  // triggered separately by the UI's play buttons (story.playNear/playFar).
+  useEffect(() => {
+    const story = storyRef.current;
+    if (!story) return;
+    switch (phase) {
+      case "intro":
+        story.showIntro();
+        break;
+      case "selected":
+        story.showOrigin();
+        break;
+      case "near":
+        story.holdNear();
+        break;
+      case "far":
+      case "final":
+        story.holdFar();
+        break;
+    }
+  }, [phase]);
 
   // Routes for the pick arrived → hand them to the trip lines so they're ready
   // to draw when the UI triggers a step. A station with no routes file (data

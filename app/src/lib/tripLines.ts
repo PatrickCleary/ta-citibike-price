@@ -3,12 +3,13 @@
 // On selection we decode the origin station's per-destination polylines and
 // split them into two tiers (≤11 min and the <45 min ). Each vertex
 // carries a timestamp = the ride time to reach it at a constant 11.2 mph. The
-// two tiers are driven INDEPENDENTLY via setTiers(): the phase sequence scrubs
-// the ≤11 set first, then fades it back and draws the full ≤45 set on top.
+// two tiers are driven INDEPENDENTLY via setTiers(): the "near" step draws the
+// ≤11 set out, the "far" step draws the full ≤45 set out in all-blue.
 //
 // Each line carries a head (ScatterplotLayer): a bead rides the drawing front,
-// then "plops" (scale overshoot) into the destination dock. fadeTrail is off,
-// so lines persist once drawn. Rendered beneath the MapLibre station layer.
+// then "plops" (scale overshoot) into the destination dock. Lines are drawn as
+// fixed-length comets (TRAIL_SECONDS) that fade out behind the head, so a line
+// fades away as it arrives. Rendered beneath the MapLibre station layer.
 
 import { MapboxOverlay } from "@deck.gl/mapbox";
 import { TripsLayer } from "deck.gl";
@@ -40,6 +41,11 @@ const DOCK_R = 3; // px — settled dot once docked
 const PLOP_MS = 450; // wall-clock duration of the dock plop
 const WHITE: [number, number, number] = [255, 255, 255];
 
+// Comet tail length, in ride-seconds. Speed is constant (SPEED_MPS), so this is
+// a fixed on-the-ground length: each line is a moving segment of this span that
+// fades out behind the head, so a line fully fades once its head docks.
+const TRAIL_SECONDS = 180;
+
 interface Trip {
   id: string; // destination station id
   path: [number, number][];
@@ -64,35 +70,34 @@ export interface TierState {
 
 const HIDDEN: TierState = { visible: false, progress: 0, opacity: 1 };
 
-// The "near" step plays in two beats: the first FLY fraction of t is a lead-in
-// (lines still hidden), the rest draws the ≤11 trips out.
 const clamp01 = (x: number) => (x < 0 ? 0 : x > 1 ? 1 : x);
 
-// The trip-line story is a pure function of (step, local progress t ∈ [0,1]):
-// step "near" draws the ≤11 set out, "fade" fades it back, "all" redraws it in
-// all-blue alongside the full <45 set. Returns the two tier states to feed
-// setTiers — all camera/dock concerns live elsewhere.
+// The trip-line frame is a pure function of (step, local progress t ∈ [0,1]):
+// step "near" draws the ≤11 set out; step "far" draws the full ≤45 set out in
+// all-blue. Returns the two tier states to feed setTiers — all camera/dock
+// concerns live elsewhere.
 export function tiersForPhase(
   phase: StepKey,
   t: number,
 ): { near: TierState; all: TierState } {
   if (phase === "near") {
-    const np = clamp01(t);
-    return { near: { visible: true, progress: np, opacity: 1 }, all: HIDDEN };
-  }
-  if (phase === "fade") {
     return {
-      near: { visible: true, progress: 1, opacity: 1 - t },
+      near: { visible: true, progress: clamp01(t), opacity: 1 },
       all: HIDDEN,
     };
   }
-  // The ≤45 set is a superset of the ≤11 set, so the all tier already covers
-  // every near destination — draw it alone, recoloured all-blue. (Don't also
-  // draw the near tier: it's scaled by nearEnd, not allEnd, so it'd crawl out
-  // at ~nearEnd/allEnd speed as a redundant slow second wave.)
+  // "far": the ≤45 set is a superset of the ≤11 set, so the all tier already
+  // covers every near destination — draw it alone, recoloured all-blue. (Don't
+  // also draw the near tier: it's scaled by nearEnd, not allEnd, so it'd crawl
+  // out at ~nearEnd/allEnd speed as a redundant slow second wave.)
   return {
     near: HIDDEN,
-    all: { visible: true, progress: t, opacity: 1, color: COLOR_ALL },
+    all: {
+      visible: true,
+      progress: clamp01(t),
+      opacity: 1,
+      color: COLOR_ALL,
+    },
   };
 }
 
@@ -195,6 +200,10 @@ export class TripLines {
   // new points (never shrinks within a draw), so the camera eases strictly
   // outward and can't wobble back in. Reset on show()/clear().
   private pointBounds: [[number, number], [number, number]] | null = null;
+  // When false, setTiers paints frames without touching the camera. Only a
+  // running draw-out tween (via beginAutoFit) owns the camera — this keeps
+  // static paints and the selection flyTo from being stomped by fitBounds.
+  private autoFit = false;
 
   constructor(map: Map) {
     this.map = map;
@@ -294,14 +303,15 @@ export class TripLines {
     build(this.nearTrips, this.nearEnd, near);
     build(this.allTrips, this.allEnd, all);
 
-    // Continuously frame the accumulated point extent. Because pointBounds only
+    // Continuously frame the accumulated point extent — but only while a
+    // draw-out tween owns the camera (beginAutoFit). Because pointBounds only
     // grows, the camera zooms strictly outward as the lines draw; duration 0
     // means each frame's paint carries the motion (no easing to fight the
     // per-frame updates).
-    if (this.pointBounds) {
+    if (this.autoFit && this.pointBounds) {
       this.map.fitBounds(this.pointBounds, {
-        padding: 10,
-        duration: 0,
+        padding: 50,
+        duration: 100,
       });
     }
 
@@ -326,8 +336,8 @@ export class TripLines {
         jointRounded: true,
         opacity: tier.opacity,
         currentTime: tier.progress * end,
-        trailLength: end, // no fade — keep lines once drawn
-        fadeTrail: false,
+        trailLength: TRAIL_SECONDS, // fixed-length comet that fades behind the head
+        fadeTrail: true,
         // valid in interleaved mode; not in the layer prop typings
         // @ts-expect-error
         beforeId,
@@ -357,10 +367,28 @@ export class TripLines {
     });
   }
 
+  // Take camera ownership for a draw-out tween: seed the extent from the CURRENT
+  // viewport (so framing grows outward from wherever the camera is now — e.g.
+  // after the selection flyTo) and enable the per-frame outward fit.
+  beginAutoFit() {
+    const [sw, ne] = this.map.getBounds().toArray();
+    this.pointBounds = [
+      [sw[0], sw[1]],
+      [ne[0], ne[1]],
+    ];
+    this.autoFit = true;
+  }
+
+  // Release camera ownership; subsequent static paints leave the camera alone.
+  endAutoFit() {
+    this.autoFit = false;
+  }
+
   clear() {
     this.nearTrips = [];
     this.allTrips = [];
     this.pointBounds = null;
+    this.autoFit = false;
     this.overlay.setProps({ layers: [] });
   }
 

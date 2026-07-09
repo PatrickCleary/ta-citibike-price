@@ -3,7 +3,7 @@ import { STATIONS_LAYER } from "./dockController";
 import { useApp } from "./store";
 
 // Wire up the station pick + hover-cursor handlers on the map, and keep them
-// bound only while the story is in the `selecting` phase. Stations are pickable
+// bound only while the story is in the `intro` phase. Stations are pickable
 // from the intro; once a station is chosen the phase advances and the handlers
 // detach, so clicks no longer hijack an in-progress story.
 //
@@ -46,11 +46,11 @@ export function registerMapHandlers(
     leaveHandler = null;
   };
 
-  if (useApp.getState().phase === "selecting") attach();
+  if (useApp.getState().phase === "intro") attach();
 
   const unsub = useApp.subscribe((state, prev) => {
-    if (state.phase === "selecting" && prev.phase !== "selecting") attach();
-    if (state.phase !== "selecting" && prev.phase === "selecting") detach();
+    if (state.phase === "intro" && prev.phase !== "intro") attach();
+    if (state.phase !== "intro" && prev.phase === "intro") detach();
   });
 
   return () => {
