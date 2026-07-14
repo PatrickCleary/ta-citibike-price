@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { CONTOURS } from "../lib/sheds";
@@ -13,10 +13,12 @@ import {
   DOCKS_ICON_LAYER,
   DOCKS_HALO_LAYER,
   ZOOM_CIRCLE,
+  ZOOM_BUBBLE_FULL,
   type StationPoint,
   stationIconPaint,
   stationIconLayout,
 } from "../lib/dockController";
+import StationBubbles from "./StationBubble";
 import { TripLines } from "../lib/tripLines";
 import { useApp } from "../lib/store";
 import { useReach, useRoutes } from "../lib/queries";
@@ -60,6 +62,9 @@ function MapView() {
   const storyRef = useRef<StoryController | null>(null); // animation clock
   const introRef = useRef(false); // intro ripple already played?
   const coordsRef = useRef(new globalThis.Map<string, [number, number]>()); // id → [lng, lat]
+  // Same docks the controller drives, but in React's hands — the bubble layer is
+  // DOM, so it needs the list (names included) rather than a map source.
+  const [stations, setStations] = useState<StationPoint[]>([]);
   const selectStation = useSelectStation();
   const { setMap, setDocks, setStory } = useMapStore();
 
@@ -119,13 +124,19 @@ function MapView() {
         const list: StationPoint[] = [];
         for (const f of fc.features) {
           const id = f.properties?.station_id;
+          const name = f.properties?.name;
           const [lon, lat] = f.geometry?.coordinates ?? [];
-          if (typeof id === "string" && typeof lon === "number") {
-            list.push({ id, lon, lat });
+          if (
+            typeof id === "string" &&
+            typeof name === "string" &&
+            typeof lon === "number"
+          ) {
+            list.push({ id, name, lon, lat });
             coordsRef.current.set(id, [lon, lat]);
           }
         }
         docksRef.current?.setStations(list);
+        setStations(list);
         playIntro();
       })
       .catch(() => {});
@@ -205,6 +216,9 @@ function MapView() {
           // minzoom drops the layer entirely instead. Keep it in sync with the
           // bottom stop of iconOpacityExpr, where the pins are still at 0.
           minzoom: ZOOM_CIRCLE,
+          // The same trick at the top end, where the bubbles have taken over —
+          // matches the last stop of iconOpacityExpr, which is also 0.
+          maxzoom: ZOOM_BUBBLE_FULL,
           layout: stationIconLayout(),
           paint: stationIconPaint(),
         });
@@ -284,7 +298,8 @@ function MapView() {
       {/* Full-screen map behind everything. */}
       <div className="fixed inset-0">
         <div ref={containerRef} className="h-full w-full" />
- 
+        {/* The dock's third look — DOM markers, zoom-gated (StationBubble.tsx). */}
+        <StationBubbles stations={stations} />
       </div>
 
       {/* Intro prompt — shown until a station is picked. */}

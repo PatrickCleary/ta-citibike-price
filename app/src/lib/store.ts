@@ -52,6 +52,20 @@ interface AppState {
   back: () => void;
 }
 
+// Transient pointer state, deliberately NOT part of AppState: hovering isn't a
+// step of the story and must never be confused with a pick. Lives here rather
+// than in mapStore because it IS reactive — the bubble layer re-renders on it.
+interface HoverState {
+  /** Dock under the cursor, or null. Only tracked during the intro. */
+  hoveredId: string | null;
+  setHovered: (id: string | null) => void;
+}
+
+export const useHover = create<HoverState>((set) => ({
+  hoveredId: null,
+  setHovered: (hoveredId) => set({ hoveredId }),
+}));
+
 export const useApp = create<AppState>((set) => ({
   selected: null,
   setSelected: (s) => set({ selected: s, phase: s ? STEP_ORDER[0] : "intro" }),

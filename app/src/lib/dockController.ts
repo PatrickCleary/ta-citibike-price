@@ -25,6 +25,7 @@ import type {
   Map,
 } from "maplibre-gl";
 import { CONTOURS } from "./sheds";
+import { BRAND_ORANGE } from "./constants";
 
 export const DOCKS_SOURCE = "stations";
 // The pins get their OWN source, normally tiled — see Map.tsx. DOCKS_SOURCE is
@@ -41,8 +42,8 @@ export const DOCK_ICON_ID = "dock-pin";
 // to draw nothing — cheaper than opacity 0, which still rasterizes everything.
 const NO_DOCK = "__none__";
 
-const SELECTED_COLOR = "#F5532B";
-const BASE_COLOR = "#F5532B";
+const SELECTED_COLOR = BRAND_ORANGE;
+const BASE_COLOR = BRAND_ORANGE;
 const COLOR_NEAR = CONTOURS[0].color; // ≤11 min — emerald
 const COLOR_RING = CONTOURS[1].color; // 11–45 min — indigo
 
@@ -55,16 +56,32 @@ const WAVE_MS = 2400;
 const FADE_MS = 500;
 const SETTLED = WAVE_MS + FADE_MS + 1; // a `time` past which everything is at rest
 
-// --- circle ⇄ pin cross-fade ----------------------------------------------
-// A dock is a dot when the field is dense and a pin once it has room to
-// breathe. Both looks live on their own layer over the same source (a circle
-// layer can't draw an image), reading the same feature-state; the swap is a
-// zoom ramp that fades one out as the other fades in. Below ZOOM_CIRCLE it's
-// all dots, above ZOOM_ICON all pins, and in between both are partly drawn.
-// Exported because the pin layer's `minzoom` must match this: below it the pins
-// are at opacity 0, so the layer may as well not exist (see Map.tsx).
+// --- circle ⇄ pin ⇄ bubble cross-fade ---------------------------------------
+// A dock is a dot when the field is dense, a pin once it has room to breathe,
+// and a named bubble once there's room for its NAME. The first two live on
+// their own layer over the same source (a circle layer can't draw an image),
+// reading the same feature-state; the swap is a zoom ramp that fades one out as
+// the other fades in. Below ZOOM_CIRCLE it's all dots, above ZOOM_ICON all
+// pins, and in between both are partly drawn.
+//
+// ZOOM_CIRCLE is exported because the pin layer's `minzoom` must match it:
+// below it the pins are at opacity 0, so the layer may as well not exist
+// (see Map.tsx).
 export const ZOOM_CIRCLE = 13;
 const ZOOM_ICON = 14.2;
+
+// The third look is DOM, not a layer (see StationBubble.tsx), so this gate is
+// about node count and label collision rather than paint. Both bottom out in
+// the same place, which is why one constant can serve both: a 1600×900 viewport
+// over Midtown holds ~420 docks at ZOOM_ICON but only ~40 here and ~20 by 17.2.
+// Docks sit ~250m apart, which is ~190px at this zoom — about where a ~150px
+// name bubble stops overlapping its neighbour.
+export const ZOOM_BUBBLE = 16.5;
+// Where the pins have fully handed off to the bubbles. Short band on purpose:
+// the two looks sit at the same anchor, so a long overlap reads as clutter.
+// Exported for the same reason as ZOOM_CIRCLE, at the other end: the pin layer's
+// `maxzoom` matches it, because above this the pins are at opacity 0.
+export const ZOOM_BUBBLE_FULL = 16.9;
 
 // --- region halo -----------------------------------------------------------
 // Each arrived dock claims a soft area around it, and together they read as one
@@ -146,6 +163,8 @@ export async function loadDockIcon(map: Map): Promise<void> {
 
 export interface StationPoint {
   id: string;
+  /** Human name ("2 Ave & 36 St") — what the bubble puts on the map. */
+  name: string;
   lon: number;
   lat: number;
 }
@@ -214,19 +233,24 @@ const opacityExpr = (time: number): ExpressionSpecification =>
 // and no feature-state, so it's set once at layer creation and never touched.
 //
 // It can afford to ignore per-dock `op` because `isolate()` already does that
-// job with a filter: every step calls isolateOrigin(id) before styling, so the
-// only pin drawn during the story is the origin. In the intro nothing is
-// isolated, but appearAll gives every dock the same `op` — so there has never
-// been a frame where two pins wanted different opacities.
+// job with a filter: every step calls isolateOrigin(id) before styling, which
+// filters this layer to NO_DOCK — the story draws no pins at all, since the
+// origin is a bubble by then. In the intro nothing is isolated, but appearAll
+// gives every dock the same `op` — so there has never been a frame where two
+// pins wanted different opacities.
 //
 // Being state-free is what lets the pins live on their own source (no
 // promoteId, no duplicated setFeatureState) — which is what actually makes them
 // cheap. See DOCKS_PIN_SOURCE.
+// The top stops hand the dock off to its bubble: the two draw at the same
+// anchor, so a pin left under a bubble is just a smudge behind the tail.
 const iconOpacityExpr = (): ExpressionSpecification =>
   [
     "interpolate", ["linear"], ["zoom"],
     ZOOM_CIRCLE, 0,
     ZOOM_ICON, 1,
+    ZOOM_BUBBLE, 1,
+    ZOOM_BUBBLE_FULL, 0,
   ];
 
 const radiusExpr = (time: number): ExpressionSpecification => {
@@ -508,18 +532,37 @@ export class DockController {
   }
 
   // Show only `id`'s dock, or pass null to restore the full clickable field.
-  // Lives here rather than in the caller so the dot and the pin can't drift out
-  // of sync — a dock is one thing wearing two looks, and both must filter alike.
+  // Lives here rather than in the caller so a dock's looks can't drift out of
+  // sync — it's one thing wearing three, and they must all filter alike.
+  //
+  // The pin is the odd one out: an isolated dock is exactly the case where the
+  // React bubble draws it (see StationBubble.tsx), and the two share an anchor,
+  // so the pin would sit behind the tail as a smudge. Filtering it to NO_DOCK
+  // rather than to `id` is what makes the bubble the origin's only look — and it
+  // means the story never pays for a symbol layer at all. The dot stays filtered
+  // to `id`: the draw-out frames outward past ZOOM_ICON, where the bubble is
+  // still the only marker but the dot is what carries the field's wave.
   isolate(id: string | null) {
     const filter: FilterSpecification | null = id
       ? ["==", ["get", "station_id"], id]
       : null;
-    for (const layer of [DOCKS_LAYER, DOCKS_ICON_LAYER]) {
-      if (!this.map.getLayer(layer)) continue;
-      const cur = this.map.getFilter(layer) as unknown[] | undefined;
-      const curId = Array.isArray(cur) ? (cur[2] as string) : null;
-      if (id !== curId) this.map.setFilter(layer, filter);
-    }
+    this.setFilterIfChanged(DOCKS_LAYER, filter, id);
+    this.setFilterIfChanged(
+      DOCKS_ICON_LAYER,
+      id ? ["==", ["get", "station_id"], NO_DOCK] : null,
+      id ? NO_DOCK : null,
+    );
+  }
+
+  private setFilterIfChanged(
+    layer: string,
+    filter: FilterSpecification | null,
+    wantId: string | null,
+  ) {
+    if (!this.map.getLayer(layer)) return;
+    const cur = this.map.getFilter(layer) as unknown[] | undefined;
+    const curId = Array.isArray(cur) ? (cur[2] as string) : null;
+    if (wantId !== curId) this.map.setFilter(layer, filter);
   }
 
   // --- EXTENSION POINT ----------------------------------------------------
