@@ -1,6 +1,6 @@
 import { useApp } from "./store";
 import { useMapStore } from "./mapStore";
-import { FULL_VIEW } from "./constants";
+import { FULL_VIEW, ORIGIN_EASE_MS, ORIGIN_ZOOM } from "./constants";
 
 export const useSelectStation = () => {
   const { setSelected } = useApp();
@@ -17,7 +17,11 @@ export const useSelectStation = () => {
     docks?.selectDock(stationId);
 
     if (!map) return;
-    map.easeTo({ center: [lng, lat], zoom: 16, duration: 2000 }); // ease out
+    map.easeTo({
+      center: [lng, lat],
+      zoom: ORIGIN_ZOOM,
+      duration: ORIGIN_EASE_MS,
+    }); // ease out
   };
 };
 

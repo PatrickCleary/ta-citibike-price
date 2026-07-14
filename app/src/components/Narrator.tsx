@@ -1,11 +1,17 @@
 import { useEffect, useState } from "react";
-import { useApp } from "../lib/store";
+import { useApp, type StepKey } from "../lib/store";
 import { useMapStore } from "../lib/mapStore";
 import { useResetMap } from "../lib/mapControl";
+import { ORIGIN_EASE_MS } from "../lib/constants";
 import NarrationBlock from "./NarrationBlock";
 
 const BTN =
   "pointer-events-auto mt-2 inline-flex items-center px-4 py-2 cursor-pointer border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:cursor-default disabled:bg-gray-300 disabled:pointer-events-none";
+
+// Secondary action (Replay) — same shape, quieter, so the primary step button
+// stays the obvious next move.
+const BTN_ALT =
+  "pointer-events-auto mt-2 inline-flex items-center px-4 py-2 cursor-pointer border border-gray-300 text-sm font-medium rounded-md shadow-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:cursor-default disabled:border-gray-200 disabled:text-gray-400 disabled:pointer-events-none";
 
 // Floating caption + step controls. Each step shows a caption and an explicit
 // play/next button; the two draw-out steps (`near`, `far`) trigger the animation
@@ -24,14 +30,14 @@ export default function Narrator() {
   useEffect(() => {
     if (!selected) return;
     setBusy(true);
-    const id = setTimeout(() => setBusy(false), 2000);
+    const id = setTimeout(() => setBusy(false), ORIGIN_EASE_MS);
     return () => clearTimeout(id);
   }, [selected?.id]);
 
   if (phase === "intro" || !selected) return null;
 
   // Play a draw-out step, then advance to the next step once it settles.
-  const play = (which: "near" | "far") => {
+  const play = (which: StepKey) => {
     if (!story) return;
     setBusy(true);
     const done = () => {
@@ -40,6 +46,23 @@ export default function Narrator() {
     };
     if (which === "near") story.playNear(done);
     else story.playFar(done);
+  };
+
+  // Re-run the step we're already on: rewind to the origin view and draw it out
+  // again, staying put rather than advancing.
+  const replay = (which: StepKey) => {
+    if (!story) return;
+    setBusy(true);
+    story.replay(which, () => setBusy(false));
+  };
+
+  // Start the whole story over: back to the first step, rewinding the camera to
+  // the origin so "Show me" draws out from the zoomed-in view again.
+  const restart = () => {
+    if (!story?.rewindToOrigin()) return;
+    setPhase("selected");
+    setBusy(true);
+    setTimeout(() => setBusy(false), ORIGIN_EASE_MS);
   };
 
   return (
@@ -63,22 +86,44 @@ export default function Narrator() {
           {phase === "near" && (
             <>
               <p>Now imagine a subsidy for every trip under 45 minutes.</p>
-              <button
-                className={BTN}
-                disabled={busy}
-                onClick={() => play("far")}
-              >
-                Show me
-              </button>
+              <div className="flex gap-2">
+                <button
+                  className={BTN_ALT}
+                  disabled={busy}
+                  onClick={() => replay("near")}
+                >
+                  Replay
+                </button>
+                <button
+                  className={BTN}
+                  disabled={busy}
+                  onClick={() => play("far")}
+                >
+                  Show me
+                </button>
+              </div>
             </>
           )}
 
           {phase === "far" && (
             <>
               <p>Here's how far $3 could take you.</p>
-              <button className={BTN} disabled={busy} onClick={() => advance()}>
-                Next
-              </button>
+              <div className="flex gap-2">
+                <button
+                  className={BTN_ALT}
+                  disabled={busy}
+                  onClick={() => replay("far")}
+                >
+                  Replay
+                </button>
+                <button
+                  className={BTN}
+                  disabled={busy}
+                  onClick={() => advance()}
+                >
+                  Next
+                </button>
+              </div>
             </>
           )}
 
@@ -87,10 +132,7 @@ export default function Narrator() {
               <h2 className="text-2xl font-bold">Help make it happen.</h2>
               <p>Tell the TA you support a 45-minute subsidized ride.</p>
               <div className="flex gap-2">
-                <button
-                  className={BTN}
-                  onClick={() => setPhase("selected")}
-                >
+                <button className={BTN} onClick={restart}>
                   Replay
                 </button>
                 <button className={BTN} onClick={() => resetMap()}>

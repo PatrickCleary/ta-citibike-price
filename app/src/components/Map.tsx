@@ -5,8 +5,8 @@ import { CONTOURS } from "../lib/sheds";
 import {
   DockController,
   stationPaint,
-  STATIONS_SOURCE,
-  STATIONS_LAYER,
+  STATIONS_SOURCE as DOCKS_SOURCE,
+  STATIONS_LAYER as DOCKS_LAYER,
   type StationPoint,
 } from "../lib/dockController";
 import { TripLines } from "../lib/tripLines";
@@ -65,7 +65,7 @@ function MapView() {
   const playIntro = useCallback(() => {
     const docks = docksRef.current;
     const map = mapRef.current;
-    if (introRef.current || !docks || !map?.getLayer(STATIONS_LAYER)) return;
+    if (introRef.current || !docks || !map?.getLayer(DOCKS_LAYER)) return;
     if (coordsRef.current.size === 0) return; // stations not loaded yet
     introRef.current = true;
     docks.appearAll(FULL_VIEW.center);
@@ -121,15 +121,15 @@ function MapView() {
       .catch(() => {});
 
     map.on("load", () => {
-      map.addSource(STATIONS_SOURCE, {
+      map.addSource(DOCKS_SOURCE, {
         type: "geojson",
         data: "/stations.geojson",
         promoteId: "station_id",
       });
       map.addLayer({
-        id: STATIONS_LAYER,
+        id: DOCKS_LAYER,
         type: "circle",
-        source: STATIONS_SOURCE,
+        source: DOCKS_SOURCE,
         paint: stationPaint(),
       });
 

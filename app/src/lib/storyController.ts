@@ -12,7 +12,7 @@ import type maplibregl from "maplibre-gl";
 import { DockController, STATIONS_LAYER } from "./dockController";
 import { TripLines, tiersForPhase } from "./tripLines";
 import { PLAYBACK_SPEEDUP, type StepKey } from "./store";
-import { FULL_VIEW } from "./constants";
+import { FULL_VIEW, ORIGIN_EASE_MS, ORIGIN_ZOOM } from "./constants";
 
 const EMPTY: Set<string> = new Set();
 
@@ -21,6 +21,7 @@ const linear = (t: number) => t; // constant speed — for bike-speed draw-out
 
 export class StoryController {
   private raf: number | null = null;
+  private rewind: ReturnType<typeof setTimeout> | null = null;
   private applied = false; // origin styling applied for the current pick?
 
   constructor(
@@ -76,10 +77,45 @@ export class StoryController {
     this.play("far", onDone);
   }
 
+  // Re-run a step from the top. The draw-out itself starts wherever the camera
+  // is (it only ever frames outward), so a replay first has to undo the zoom-out
+  // the last draw left behind: clear the lines, ease back to the origin view the
+  // selection landed on, and only then play. onDone fires when the draw settles,
+  // same as playNear/playFar.
+  replay(key: StepKey, onDone?: () => void) {
+    if (!this.rewindToOrigin(key)) return;
+    this.rewind = setTimeout(() => {
+      this.rewind = null;
+      this.play(key, onDone);
+    }, ORIGIN_EASE_MS);
+  }
+
+  // Clear the drawn lines and ease back to the origin view, without playing
+  // anything. Returns false if there's no pick to rewind to. Standalone, this is
+  // the "start the story over" frame (the final step's Replay); `replay` chains
+  // a draw-out onto it.
+  rewindToOrigin(key: StepKey = "near"): boolean {
+    this.stop();
+    if (!this.hasOrigin()) return false;
+    const origin = this.originFor(this.selectedId()!)!;
+    this.renderStep(key, 0, { hideTrips: true });
+    this.map.stop();
+    this.map.easeTo({
+      center: origin,
+      zoom: ORIGIN_ZOOM,
+      duration: ORIGIN_EASE_MS,
+    });
+    return true;
+  }
+
   stop() {
     if (this.raf != null) {
       cancelAnimationFrame(this.raf);
       this.raf = null;
+    }
+    if (this.rewind != null) {
+      clearTimeout(this.rewind);
+      this.rewind = null;
     }
     this.trips.endAutoFit();
   }
