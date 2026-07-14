@@ -5,9 +5,17 @@ import { CONTOURS } from "../lib/sheds";
 import {
   DockController,
   stationPaint,
-  STATIONS_SOURCE as DOCKS_SOURCE,
-  STATIONS_LAYER as DOCKS_LAYER,
+  stationHaloPaint,
+  loadDockIcon,
+  DOCKS_SOURCE,
+  DOCKS_PIN_SOURCE,
+  DOCKS_LAYER,
+  DOCKS_ICON_LAYER,
+  DOCKS_HALO_LAYER,
+  ZOOM_CIRCLE,
   type StationPoint,
+  stationIconPaint,
+  stationIconLayout,
 } from "../lib/dockController";
 import { TripLines } from "../lib/tripLines";
 import { useApp } from "../lib/store";
@@ -53,6 +61,7 @@ function MapView() {
   const introRef = useRef(false); // intro ripple already played?
   const coordsRef = useRef(new globalThis.Map<string, [number, number]>()); // id → [lng, lat]
   const selectStation = useSelectStation();
+  const { setMap, setDocks, setStory } = useMapStore();
 
   // Discrete control state lives in the store; server data in react-query.
   const selected = useApp((s) => s.selected);
@@ -76,6 +85,7 @@ function MapView() {
   useEffect(() => {
     if (!containerRef.current) return;
     let unregisterHandlers: (() => void) | null = null;
+    let disposed = false; // guards the async icon load against unmount
     const map = new maplibregl.Map({
       container: containerRef.current,
       style: STYLE_URL,
@@ -95,9 +105,9 @@ function MapView() {
     );
     // Publish the imperative objects so hooks (selectStation, resetMap) can
     // reach them from anywhere without prop-drilling a ref.
-    useMapStore.getState().setMap(map);
-    useMapStore.getState().setDocks(docksRef.current);
-    useMapStore.getState().setStory(storyRef.current);
+    setMap(map);
+    setDocks(docksRef.current);
+    setStory(storyRef.current);
     // Pan/zoom stay enabled (defaults) so the intro is explorable; they're
     // locked while the camera-driven story plays. Rotation/pitch stay off (2D).
     map.dragRotate.disable();
@@ -120,11 +130,45 @@ function MapView() {
       })
       .catch(() => {});
 
-    map.on("load", () => {
+    map.on("load", async () => {
       map.addSource(DOCKS_SOURCE, {
         type: "geojson",
         data: "/stations.geojson",
         promoteId: "station_id",
+        // Both of these exist for the region heatmap, which can only draw docks
+        // that are in a LOADED tile. Its radius is geographic (~500m), so a
+        // pixel's colour depends on docks well outside the viewport — and by
+        // default the tiles holding them simply aren't loaded once you zoom in.
+        // The region then starves and flickers as tiles come and go.
+        //
+        // maxzoom 13 stops subdividing there and overzooms above it, so a close
+        // view reuses a ~5km tile that still contains every dock that could feed
+        // it. buffer 512 (the max, ~613m at z13) then covers docks just outside
+        // that tile, so the region doesn't seam at tile edges either.
+        // Points aren't simplified, so the dots and pins are unaffected.
+        maxzoom: 13,
+        buffer: 512,
+      });
+      // The same docks again, tiled normally — for the pins only. They can't
+      // share DOCKS_SOURCE: its maxzoom 13 is what the heatmap needs, but it
+      // means a zoom-16 view is served by one overzoomed ~5km tile containing
+      // every dock inside it. The circle layer shrugs that off (no placement
+      // pass); the symbol layer was placing hundreds of pins to draw ~20. With
+      // default tiling a z16 view loads z16 tiles, so it places ~20.
+      //
+      // No promoteId: the pins are deliberately feature-state-free (see
+      // iconOpacityExpr), so this source never needs a state write.
+      map.addSource(DOCKS_PIN_SOURCE, {
+        type: "geojson",
+        data: "/stations.geojson",
+      });
+      // The region under everything: added before the dots so the trip lines
+      // (which insert with beforeId: DOCKS_LAYER) land between the two.
+      map.addLayer({
+        id: DOCKS_HALO_LAYER,
+        type: "heatmap",
+        source: DOCKS_SOURCE,
+        paint: stationHaloPaint(),
       });
       map.addLayer({
         id: DOCKS_LAYER,
@@ -140,9 +184,40 @@ function MapView() {
       // have also loaded) ripple the field in.
       storyRef.current?.showIntro();
       playIntro();
+
+      // Pins are a second look at the same docks: a symbol layer over the same
+      // source and feature-state, cross-faded against the dots by zoom (see
+      // dockController). Added last so rasterizing the SVG never delays the
+      // clickable field — until it lands, the dots simply carry the whole map.
+      // Clicks keep hitting the circle layer either way; a zero-opacity circle
+      // is still queryable, so the pin layer stays purely cosmetic.
+      try {
+        await loadDockIcon(map);
+        if (disposed) return;
+        map.addLayer({
+          id: DOCKS_ICON_LAYER,
+          type: "symbol",
+          source: DOCKS_PIN_SOURCE,
+          // Load-bearing for performance, not just for looks. icon-opacity is
+          // PAINT, so the cross-fade hides the pins below ZOOM_CIRCLE but still
+          // lays out and places all ~2.4k of them on every camera frame — the
+          // whole intro (zoom 10.3) was paying full symbol cost to draw nothing.
+          // minzoom drops the layer entirely instead. Keep it in sync with the
+          // bottom stop of iconOpacityExpr, where the pins are still at 0.
+          minzoom: ZOOM_CIRCLE,
+          layout: stationIconLayout(),
+          paint: stationIconPaint(),
+        });
+      } catch (e) {
+        // No pins — the dot field is a complete map on its own, so this is
+        // survivable. Still loud: a bad icon expression fails exactly here, and
+        // silently losing the layer looks identical to "zoomed out too far".
+        console.error("dock pin layer unavailable", e);
+      }
     });
 
     return () => {
+      disposed = true;
       unregisterHandlers?.();
       storyRef.current?.dispose();
       docksRef.current?.dispose();
@@ -209,39 +284,12 @@ function MapView() {
       {/* Full-screen map behind everything. */}
       <div className="fixed inset-0">
         <div ref={containerRef} className="h-full w-full" />
-
-        {/* Legend (color key + counts) */}
-        <div className="absolute left-4 top-4 max-w-xs rounded-lg bg-white/90 p-4 shadow-lg backdrop-blur">
-          <h1 className="text-base font-semibold text-gray-900">
-            Citi Bike Sheds
-          </h1>
-          <p className="mt-1 text-sm text-gray-600">{selected?.name ?? "…"}</p>
-          {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
-          <div className="mt-3 space-y-1">
-            {CONTOURS.map((c) => (
-              <div
-                key={c.minutes}
-                className="flex items-center gap-2 text-xs text-gray-600"
-              >
-                <span
-                  className="inline-block h-3 w-3 rounded-full"
-                  style={{ backgroundColor: c.color }}
-                />
-                {c.label}
-                {counts && (
-                  <span className="ml-auto font-medium text-gray-900">
-                    {counts[c.minutes]}
-                  </span>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
+ 
       </div>
 
       {/* Intro prompt — shown until a station is picked. */}
       {!selected && (
-        <div className="pointer-events-none fixed inset-x-0 top-24 flex justify-center px-4">
+        <div className="pointer-events-none fixed inset-x-0 top-8 flex justify-center px-4">
           <div className="max-w-xl rounded-xl bg-white/85 px-6 py-4 text-center shadow-lg backdrop-blur">
             <span className="block text-2xl font-semibold text-gray-900">
               Where can a Citi Bike take you?

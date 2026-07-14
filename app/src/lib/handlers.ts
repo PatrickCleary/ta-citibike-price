@@ -1,5 +1,5 @@
 import type maplibregl from "maplibre-gl";
-import { STATIONS_LAYER } from "./dockController";
+import { DOCKS_ICON_LAYER, DOCKS_LAYER } from "./dockController";
 import { useApp } from "./store";
 
 // Wire up the station pick + hover-cursor handlers on the map, and keep them
@@ -31,15 +31,18 @@ export function registerMapHandlers(
       map.getCanvas().style.cursor = "";
     };
 
-    map.on("click", STATIONS_LAYER, clickHandler);
-    map.on("mouseenter", STATIONS_LAYER, enterHandler);
-    map.on("mouseleave", STATIONS_LAYER, leaveHandler);
+    map.on("click", DOCKS_LAYER, clickHandler);
+    map.on("mouseenter", DOCKS_LAYER, enterHandler);
+    map.on("mouseleave", DOCKS_LAYER, leaveHandler);
+    map.on("click", DOCKS_ICON_LAYER, clickHandler);
+    map.on("mouseenter", DOCKS_ICON_LAYER, enterHandler);
+    map.on("mouseleave", DOCKS_ICON_LAYER, leaveHandler);
   };
 
   const detach = () => {
-    if (clickHandler) map.off("click", STATIONS_LAYER, clickHandler);
-    if (enterHandler) map.off("mouseenter", STATIONS_LAYER, enterHandler);
-    if (leaveHandler) map.off("mouseleave", STATIONS_LAYER, leaveHandler);
+    if (clickHandler) map.off("click", DOCKS_LAYER, clickHandler);
+    if (enterHandler) map.off("mouseenter", DOCKS_LAYER, enterHandler);
+    if (leaveHandler) map.off("mouseleave", DOCKS_LAYER, leaveHandler);
     map.getCanvas().style.cursor = "";
     clickHandler = null;
     enterHandler = null;

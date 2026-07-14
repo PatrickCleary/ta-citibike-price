@@ -9,8 +9,8 @@
 // ever play a step forward or paint its resting frame.
 
 import type maplibregl from "maplibre-gl";
-import { DockController, STATIONS_LAYER } from "./dockController";
-import { TripLines, tiersForPhase } from "./tripLines";
+import { DockController } from "./dockController";
+import { TripLines, tiersForPhase, tierColor } from "./tripLines";
 import { PLAYBACK_SPEEDUP, type StepKey } from "./store";
 import { FULL_VIEW, ORIGIN_EASE_MS, ORIGIN_ZOOM } from "./constants";
 
@@ -22,7 +22,11 @@ const linear = (t: number) => t; // constant speed — for bike-speed draw-out
 export class StoryController {
   private raf: number | null = null;
   private rewind: ReturnType<typeof setTimeout> | null = null;
-  private applied = false; // origin styling applied for the current pick?
+  // Which dock styling is currently baked: a StepKey (that step's region), or
+  // "bare" (origin only, no region). Latched so the per-frame renderStep doesn't
+  // re-bake 2.4k feature-states every tick — but keyed by step, not just by pick,
+  // because each step paints a different region.
+  private applied: StepKey | "bare" | null = null;
 
   constructor(
     private map: maplibregl.Map,
@@ -120,9 +124,9 @@ export class StoryController {
     this.trips.endAutoFit();
   }
 
-  // Clear the per-pick latch so the next pick re-applies origin styling.
+  // Clear the latch so the next pick re-applies dock styling from scratch.
   resetPick() {
-    this.applied = false;
+    this.applied = null;
   }
 
   dispose() {
@@ -168,7 +172,7 @@ export class StoryController {
   ) {
     const id = this.selectedId()!;
     this.isolateOrigin(id);
-    this.ensureOriginStyling(id);
+    this.ensureDockStyling(id, key, t, !!opts?.hideTrips);
     if (opts?.hideTrips) {
       this.trips.setTiers({ visible: false, progress: 0, opacity: 1 }, { visible: false, progress: 0, opacity: 1 });
       return;
@@ -182,24 +186,23 @@ export class StoryController {
     return !!(id && this.originFor(id));
   }
 
-  // Isolate the origin dot when a station is picked (`id`); pass null to restore
-  // the full clickable field (the intro).
+  // Isolate the origin dock when a station is picked (`id`); pass null to
+  // restore the full clickable field (the intro). DockController owns the
+  // filtering itself now that a dock draws on two layers (dot + pin).
   private isolateOrigin(id: string | null) {
-    if (!this.map.getLayer(STATIONS_LAYER)) return;
-    const cur = this.map.getFilter(STATIONS_LAYER) as unknown[] | undefined;
-    const curId = Array.isArray(cur) ? (cur[2] as string) : null;
-    if (id !== curId) {
-      this.map.setFilter(
-        STATIONS_LAYER,
-        id ? ["==", ["get", "station_id"], id] : null,
-      );
-    }
+    this.docks.isolate(id);
   }
 
-  // Apply the red origin marker + plop once per pick (latched by `applied`,
-  // cleared by resetPick).
-  private ensureOriginStyling(id: string) {
-    if (this.applied) return;
+  // Bake the origin marker and this step's region into feature-state, once per
+  // step (latched by `applied`, cleared by resetPick).
+  //
+  // `bare` is the pre-draw frame (showOrigin / rewindToOrigin): origin only, no
+  // region — the lines haven't ridden out yet, so nothing has arrived.
+  private ensureDockStyling(id: string, key: StepKey, t: number, bare: boolean) {
+    const tag = bare ? "bare" : key;
+    if (this.applied === tag) return;
+    this.applied = tag;
+
     this.docks.select({
       selectedId: id,
       near: EMPTY,
@@ -207,8 +210,19 @@ export class StoryController {
       showNear: true,
       showRing: true,
       hideOthers: true,
+      // Each destination's halo blooms as its own line docks, so the region
+      // grows with the ride instead of appearing all at once. Same delays feed
+      // the dot wave, so the two can't drift apart.
+      halo: bare ? EMPTY : this.trips.destinations(key),
+      delays: bare ? undefined : this.trips.arrivalDelays(key),
+      haloColor: tierColor(key),
     });
-    this.docks.start();
-    this.applied = true;
+
+    // A draw-out starting from the top (t≈0) plays the wave alongside the lines.
+    // A resting frame (holdNear/holdFar land at t=1) has no lines to sync to, so
+    // settle instantly — otherwise the region would bloom in over an already
+    // fully-drawn map.
+    if (t >= 1) this.docks.refresh();
+    else this.docks.start();
   }
 }

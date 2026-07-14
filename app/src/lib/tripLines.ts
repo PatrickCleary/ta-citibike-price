@@ -17,11 +17,17 @@ import { ScatterplotLayer } from "@deck.gl/layers";
 import polyline from "@mapbox/polyline";
 import type { Map } from "maplibre-gl";
 import type { Routes } from "./trips";
-import type { StepKey } from "./store";
-import { STATIONS_LAYER } from "./dockController";
+import { PLAYBACK_SPEEDUP, type StepKey } from "./store";
+import { DOCKS_LAYER } from "./dockController";
 
-const COLOR_NEAR: [number, number, number] = [16, 185, 129]; // ≤11 min — emerald
+export const COLOR_NEAR: [number, number, number] = [245, 83, 43]; // ≤11 min — brand orange
 export const COLOR_ALL: [number, number, number] = [99, 102, 241]; // 11–45 min — indigo
+
+// The colour a step draws in: "near" keeps the ≤11 colour, "far" recolours the
+// whole ≤45 superset all-blue (see tiersForPhase). The region halo reads this so
+// it can't drift from the lines it's summarising.
+export const tierColor = (phase: StepKey): [number, number, number] =>
+  phase === "near" ? COLOR_NEAR : COLOR_ALL;
 
 // Ride speed used to convert route distance into ride time.
 const SPEED_MPS = (11.2 * 1609.344) / 3600; // 11.2 mph ≈ 5.01 m/s
@@ -213,7 +219,7 @@ export class TripLines {
 
   // Only insert under the station layer once it exists (added on map `load`).
   private beforeId(): string | undefined {
-    return this.map.getLayer(STATIONS_LAYER) ? STATIONS_LAYER : undefined;
+    return this.map.getLayer(DOCKS_LAYER) ? DOCKS_LAYER : undefined;
   }
 
   getOrigin(): [number, number] | null {
@@ -224,6 +230,29 @@ export class TripLines {
   // dock-plop tail). Drives constant-bike-speed playback in StoryController.
   rideSecondsFor(phase: StepKey): number {
     return phase === "near" ? this.nearEnd : this.allEnd;
+  }
+
+  private tripsFor(phase: StepKey): Trip[] {
+    return phase === "near" ? this.nearTrips : this.allTrips;
+  }
+
+  // The destination docks this step rides out to.
+  destinations(phase: StepKey): Set<string> {
+    return new Set(this.tripsFor(phase).map((t) => t.id));
+  }
+
+  // Per-destination arrival as wall-ms from the start of this step's draw-out —
+  // the instant that dock's bead docks. Trip timestamps are ride-seconds and the
+  // draw-out plays at PLAYBACK_SPEEDUP, so this is the same conversion play()
+  // uses for its duration. Feeds DockController.Selection.delays, which is in
+  // wall-ms, so the dot plop and region halo land on the arriving line's frame.
+  arrivalDelays(phase: StepKey): globalThis.Map<string, number> {
+    const out = new globalThis.Map<string, number>();
+    for (const t of this.tripsFor(phase)) {
+      const arrival = t.timestamps[t.timestamps.length - 1];
+      out.set(t.id, (arrival * 1000) / PLAYBACK_SPEEDUP);
+    }
+    return out;
   }
 
   // Decode a station's routes into the two tiers. The all tier is the <45 min

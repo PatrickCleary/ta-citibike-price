@@ -1,9 +1,10 @@
 import { useApp } from "./store";
-import { useMapStore } from "./mapStore";
+import { useMapStore, useSetMapInteractive } from "./mapStore";
 import { FULL_VIEW, ORIGIN_EASE_MS, ORIGIN_ZOOM } from "./constants";
 
 export const useSelectStation = () => {
   const { setSelected } = useApp();
+  const setMapInteractive = useSetMapInteractive(); // ensure the map is interactive when a station is picked
   return (station: maplibregl.MapGeoJSONFeature) => {
     const stationId = station.properties?.station_id as string;
     const name = station.properties?.name as string;
@@ -15,7 +16,8 @@ export const useSelectStation = () => {
     // Highlight the picked dock red and fade the rest of the field out.
     const { map, docks } = useMapStore.getState();
     docks?.selectDock(stationId);
-
+    console.log('disbling')
+    setMapInteractive(false);
     if (!map) return;
     map.easeTo({
       center: [lng, lat],
