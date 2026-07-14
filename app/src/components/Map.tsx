@@ -302,22 +302,42 @@ function MapView() {
         <StationBubbles stations={stations} />
       </div>
 
-      {/* Intro prompt — shown until a station is picked. */}
-      {!selected && (
-        <div className="pointer-events-none fixed inset-x-0 top-8 flex justify-center px-4">
-          <div className="max-w-xl rounded-xl bg-white/85 px-6 py-4 text-center shadow-lg backdrop-blur">
-            <span className="block text-2xl font-semibold text-gray-900">
-              Where can a Citi Bike take you?
-            </span>
-            <span className="mt-2 block text-base text-gray-600">
-              Click any station to ride out from it.
-            </span>
-          </div>
-        </div>
-      )}
-
+      <div className="pointer-events-none fixed inset-x-0 top-8 flex justify-center px-4">
+        <MapHeader />
+      </div>
       {/* Step caption + prev/next controls — phase-driven, shown during the story. */}
       <Narrator />
     </>
   );
 }
+
+const MapHeader: React.FC = () => {
+  // One selector per field. A selector returning an object literal builds a new
+  // reference every run, and zustand v5 compares snapshots by identity — so it
+  // would re-render, reselect, and loop until React bails out.
+  const phase = useApp((s) => s.phase);
+  const selected = useApp((s) => s.selected);
+
+  if (phase === "intro" || !selected)
+    return (
+      <div className="max-w-xl rounded-xl bg-white/85 px-6 py-4 text-center shadow-lg backdrop-blur">
+        <span className="block text-2xl font-semibold text-gray-900">
+          Where can a Citi Bike take you?
+        </span>
+        <span className="mt-2 block text-base text-gray-600">
+          Click any station to ride out from it.
+        </span>
+      </div>
+    );
+  if (phase === "near")
+    return (
+      <div className="max-w-xl rounded-xl bg-white/85 px-6 py-4 text-center shadow-lg backdrop-blur">
+        <span className="block text-2xl font-semibold text-gray-900">
+          This is how far a $3.00 ride on a Citi Bike can take you
+          currently. {" "}
+        </span>
+      </div>
+    );
+    
+  return null;
+};

@@ -72,7 +72,9 @@ export default function Narrator() {
           {phase === "selected" && (
             <>
               <h2 className="text-2xl font-bold">{selected.name}</h2>
-              <p>How far can $3 get you today? Every trip 11 minutes or less.</p>
+              <p>
+                How far can $3 get you today? Every trip 11 minutes or less.
+              </p>
               <button
                 className={BTN}
                 disabled={busy}
@@ -85,7 +87,10 @@ export default function Narrator() {
 
           {phase === "near" && (
             <>
-              <p>Now imagine a subsidy for every trip under 45 minutes.</p>
+              <p>
+                That’s not very far at all — does that get you to work, to your
+                friends’ apartments, or even to Bushwick’s 3 Dollar Bill?{" "}
+              </p>
               <div className="flex gap-2">
                 <button
                   className={BTN_ALT}
@@ -99,7 +104,7 @@ export default function Narrator() {
                   disabled={busy}
                   onClick={() => play("far")}
                 >
-                  Show me
+                  Next
                 </button>
               </div>
             </>
