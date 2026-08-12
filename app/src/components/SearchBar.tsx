@@ -11,9 +11,15 @@ interface SearchBarProps {
   stations: StationPoint[];
   mapCenter?: maplibregl.LngLat;
   onSelect: (result: Suggestion) => void;
+  onClear: () => void;
 }
 
-export function SearchBar({ stations, mapCenter, onSelect }: SearchBarProps) {
+export function SearchBar({
+  stations,
+  mapCenter,
+  onSelect,
+  onClear,
+}: SearchBarProps) {
   const [query, setQuery] = useState("");
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [loading, setLoading] = useState(false);
@@ -174,6 +180,7 @@ export function SearchBar({ stations, mapCenter, onSelect }: SearchBarProps) {
               setQuery("");
               setSuggestions([]);
               setOpen(false);
+              onClear();
             }}
             className="rounded-xl p-0.5 text-slate-400 hover:text-slate-600"
             aria-label="Clear search"
