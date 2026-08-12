@@ -28,6 +28,7 @@ import { StoryController } from "../lib/storyController";
 import { registerMapHandlers } from "../lib/handlers";
 import { FULL_VIEW } from "../lib/constants";
 import Narrator from "./Narrator";
+import { SearchBar, type Suggestion } from "./SearchBar";
 
 const STADIA_KEY = import.meta.env.PUBLIC_STADIA_API_KEY;
 // Custom "Alidade Smooth, no labels" style. Its tiles/sprite are served by
@@ -84,6 +85,22 @@ function MapView() {
     introRef.current = true;
     docks.appearAll(FULL_VIEW.center);
     docks.start();
+  }, []);
+
+  const handleSelect = useCallback((result: Suggestion) => {
+    mapRef.current?.flyTo({
+      center: [result.lon, result.lat],
+      zoom: result.type === 'station' ? 16 : 15,
+      duration: 800,
+    });
+
+    if (result.type === 'station') {
+      // e.g. open a popup on that station's marker
+      selectStation({ id: result.id, name: result.label, lon: result.lon, lat: result.lat });
+    } else {
+      // e.g. drop a temporary pin
+      new maplibregl.Marker().setLngLat([result.lon, result.lat]).addTo(mapRef.current!);
+    }
   }, []);
 
   // --- one-time map setup -------------------------------------------------
@@ -302,11 +319,13 @@ function MapView() {
         <StationBubbles stations={stations} />
       </div>
 
-      <div className="pointer-events-none fixed inset-x-0 top-8 flex justify-center px-4">
+      <div className="pointer-events-none fixed inset-x-0 top-3 left-3 flex justify-center px-4">
         <MapHeader />
       </div>
       {/* Step caption + prev/next controls — phase-driven, shown during the story. */}
       <Narrator />
+
+      <SearchBar stations={stations} mapCenter={mapRef.current?.getCenter()} onSelect={handleSelect} />
     </>
   );
 }
@@ -320,18 +339,18 @@ const MapHeader: React.FC = () => {
 
   if (phase === "intro" || !selected)
     return (
-      <div className="max-w-xl rounded-xl bg-white/85 px-6 py-4 text-center shadow-lg backdrop-blur">
+      <div className="rounded-xl bg-white/85 px-6 py-4 shadow-lg backdrop-blur">
         <span className="block text-2xl font-semibold text-gray-900">
           Where can a Citi Bike take you?
         </span>
         <span className="mt-2 block text-base text-gray-600">
-          Click any station to ride out from it.
+          Click any station to ride out from it — or, search for a station or address
         </span>
       </div>
     );
   if (phase === "near")
     return (
-      <div className="max-w-xl rounded-xl bg-white/85 px-6 py-4 text-center shadow-lg backdrop-blur">
+      <div className="rounded-xl bg-white/85 px-6 py-4 shadow-lg backdrop-blur">
         <span className="block text-2xl font-semibold text-gray-900">
           This is how far a $3.00 ride on a Citi Bike can take you
           currently. {" "}
