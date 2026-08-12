@@ -63,6 +63,7 @@ function MapView() {
   const storyRef = useRef<StoryController | null>(null); // animation clock
   const introRef = useRef(false); // intro ripple already played?
   const coordsRef = useRef(new globalThis.Map<string, [number, number]>()); // id → [lng, lat]
+  const markerRef = useRef<maplibregl.Marker | null>(null);
   // Same docks the controller drives, but in React's hands — the bubble layer is
   // DOM, so it needs the list (names included) rather than a map source.
   const [stations, setStations] = useState<StationPoint[]>([]);
@@ -90,16 +91,24 @@ function MapView() {
   const handleSelect = useCallback((result: Suggestion) => {
     mapRef.current?.flyTo({
       center: [result.lon, result.lat],
-      zoom: result.type === 'station' ? 16 : 15,
+      zoom: result.type === "station" ? 16 : 15,
       duration: 800,
     });
 
-    if (result.type === 'station') {
-      // e.g. open a popup on that station's marker
-      selectStation({ id: result.id, name: result.label, lon: result.lon, lat: result.lat });
+    markerRef.current?.remove();
+    markerRef.current = null;
+
+    if (result.type === "station") {
+      selectStation({
+        id: result.id,
+        name: result.label,
+        lon: result.lon,
+        lat: result.lat,
+      });
     } else {
-      // e.g. drop a temporary pin
-      new maplibregl.Marker().setLngLat([result.lon, result.lat]).addTo(mapRef.current!);
+      markerRef.current = new maplibregl.Marker()
+        .setLngLat([result.lon, result.lat])
+        .addTo(mapRef.current!);
     }
   }, []);
 
@@ -319,13 +328,22 @@ function MapView() {
         <StationBubbles stations={stations} />
       </div>
 
-      <div className="pointer-events-none fixed inset-x-0 top-3 left-3 flex justify-center px-4">
-        <MapHeader />
+      <div className="fixed inset-0 pointer-events-none">
+        <div className="m-4 flex justify-center flex flex-col gap-3 md:w-md">
+          <MapHeader />
+          <SearchBar
+            stations={stations}
+            mapCenter={mapRef.current?.getCenter()}
+            onSelect={handleSelect}
+            onClear={() => {
+              markerRef.current?.remove();
+              markerRef.current = null;
+            }}
+          />
+        </div>
       </div>
       {/* Step caption + prev/next controls — phase-driven, shown during the story. */}
       <Narrator />
-
-      <SearchBar stations={stations} mapCenter={mapRef.current?.getCenter()} onSelect={handleSelect} />
     </>
   );
 }
@@ -344,7 +362,8 @@ const MapHeader: React.FC = () => {
           Where can a Citi Bike take you?
         </span>
         <span className="mt-2 block text-base text-gray-600">
-          Click any station to ride out from it — or, search for a station or address
+          Click any station to ride out from it — or, search for a station or
+          address
         </span>
       </div>
     );
@@ -357,6 +376,6 @@ const MapHeader: React.FC = () => {
         </span>
       </div>
     );
-    
+
   return null;
 };
