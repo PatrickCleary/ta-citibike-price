@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useApp, type StepKey } from "../lib/store";
-import { useMapStore } from "../lib/mapStore";
+import { useMapStore, useSetMapInteractive } from "../lib/mapStore";
 import { useResetMap } from "../lib/mapControl";
 import { ORIGIN_EASE_MS } from "../lib/constants";
 import NarrationBlock from "./NarrationBlock";
@@ -24,6 +24,8 @@ export default function Narrator() {
   const story = useMapStore((s) => s.story);
   const resetMap = useResetMap();
   const [busy, setBusy] = useState(false);
+  const [hidden, setHidden] = useState(false);
+  const setMapInteractive = useSetMapInteractive();
 
   // Gate the controls for the duration of the selection flyTo (see mapControl)
   // so a draw-out can't start before the camera settles on the origin.
@@ -34,8 +36,6 @@ export default function Narrator() {
     return () => clearTimeout(id);
   }, [selected?.id]);
 
-  if (phase === "intro" || !selected) return null;
-
   // Play a draw-out step, then advance to the next step once it settles.
   const play = (which: StepKey) => {
     if (!story) return;
@@ -43,6 +43,7 @@ export default function Narrator() {
     const done = () => {
       setBusy(false);
       advance();
+      setMapInteractive(true);
     };
     if (which === "near") story.playNear(done);
     else story.playFar(done);
@@ -65,31 +66,61 @@ export default function Narrator() {
     setTimeout(() => setBusy(false), ORIGIN_EASE_MS);
   };
 
+  useEffect(() => {
+    setHidden(false);
+  }, [phase]);
+
   return (
-    <div className="fixed inset-x-0 bottom-8 flex flex-col items-center gap-4 px-4">
-      <NarrationBlock>
-        <div className="pointer-events-auto flex flex-col items-center gap-1">
-          {phase === "selected" && (
+    <div className="pointer-events-auto flex flex-col gap-1">
+      {!hidden ? (
+        <div className="flex flex-col gap-3 mt-2">
+          {phase === "intro" && (
             <>
-              <h2 className="text-2xl font-bold">{selected.name}</h2>
               <p>
-                How far can $3 get you today? Every trip 11 minutes or less.
+                Use this tool to see how far you can get with{" "}
+                <strong>$3</strong> on a Citi Bike E-bike with a membership.
               </p>
-              <button
-                className={BTN}
-                disabled={busy}
-                onClick={() => play("near")}
-              >
-                Show me
-              </button>
+              <p>
+                To get started, find a station on the map or use the search bar.
+              </p>
+            </>
+          )}
+          {phase === "selected" && selected && (
+            <>
+              <p>
+                How far can <strong>$3</strong> get you today? Use the button
+                below to show you how far you can go — about 11 minutes of
+                riding at $0.27 per minute.
+              </p>
+              <div className="flex gap-2">
+                <button
+                  className={BTN}
+                  disabled={busy}
+                  onClick={() => play("near")}
+                >
+                  Travel from {selected.name}
+                </button>
+                <button
+                  className={BTN_ALT}
+                  disabled={busy}
+                  onClick={() => resetMap()}
+                >
+                  Back
+                </button>
+              </div>
             </>
           )}
 
           {phase === "near" && (
             <>
               <p>
-                That’s not very far at all — does that get you to work, to your
-                friends’ apartments, or even to Bushwick’s 3 Dollar Bill?{" "}
+                That's not very far at all — does that get you to work, to your
+                friends' apartments, or even to Bushwick's 3 Dollar Bill?
+              </p>
+              <p>
+                Next, use the button below to see how far you could get for the
+                same price if we <strong>capped the fares at $3</strong> for a
+                45-minute ride.
               </p>
               <div className="flex gap-2">
                 <button
@@ -104,7 +135,7 @@ export default function Narrator() {
                   disabled={busy}
                   onClick={() => play("far")}
                 >
-                  Next
+                  Cap the fares
                 </button>
               </div>
             </>
@@ -112,7 +143,11 @@ export default function Narrator() {
 
           {phase === "far" && (
             <>
-              <p>Here's how far $3 could take you.</p>
+              <p>This is how far you could ride.</p>
+              <p>
+                That's a huge difference in how far you can get for the same
+                price!
+              </p>
               <div className="flex gap-2">
                 <button
                   className={BTN_ALT}
@@ -126,7 +161,7 @@ export default function Narrator() {
                   disabled={busy}
                   onClick={() => advance()}
                 >
-                  Next
+                  Amazing — let's make it happen
                 </button>
               </div>
             </>
@@ -134,8 +169,10 @@ export default function Narrator() {
 
           {phase === "final" && (
             <>
-              <h2 className="text-2xl font-bold">Help make it happen.</h2>
-              <p>Tell the TA you support a 45-minute subsidized ride.</p>
+              <p>
+                Placeholder for TA copy about the campaign and links to
+                resources, etc.
+              </p>
               <div className="flex gap-2">
                 <button className={BTN} onClick={restart}>
                   Replay
@@ -146,8 +183,33 @@ export default function Narrator() {
               </div>
             </>
           )}
+          <button
+            className="w-full flex justify-center md:hidden"
+            onClick={() => setHidden(true)}
+          >
+            <svg width="2em" height="2em" viewBox="0 0 24 24">
+              <path d="M0 0h24v24H0z" fill="none" />
+              <path
+                fill="currentColor"
+                d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6l-6 6z"
+              />
+            </svg>
+          </button>
         </div>
-      </NarrationBlock>
+      ) : (
+        <button
+          className="w-full flex justify-center md:hidden"
+          onClick={() => setHidden(false)}
+        >
+          <svg width="2em" height="2em" viewBox="0 0 24 24">
+            <path d="M0 0h24v24H0z" fill="none" />
+            <path
+              fill="currentColor"
+              d="M7.41 8.58L12 13.17l4.59-4.59L18 10l-6 6l-6-6z"
+            />
+          </svg>
+        </button>
+      )}
     </div>
   );
 }

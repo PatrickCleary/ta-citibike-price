@@ -69,7 +69,7 @@ export function SearchBar({
             lon: a.lon,
           })),
         ];
-        setSuggestions(merged.slice(0, 8));
+        setSuggestions(merged.slice(0, 10));
       } catch (err: any) {
         if (err.name !== "AbortError") console.error(err);
       } finally {

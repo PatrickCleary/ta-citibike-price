@@ -27,9 +27,11 @@ export const useSelectStation = () => {
 
 export const useResetMap = () => {
   const { setSelected } = useApp();
+  const setMapInteractive = useSetMapInteractive();
 
   return () => {
     setSelected(null);
+    setMapInteractive(true);
     const { map, docks } = useMapStore.getState();
     if (!map) return;
     docks?.reset();

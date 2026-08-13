@@ -29,6 +29,7 @@ import { registerMapHandlers } from "../lib/handlers";
 import { FULL_VIEW } from "../lib/constants";
 import Narrator from "./Narrator";
 import { SearchBar, type Suggestion } from "./SearchBar";
+import { useIsMobile } from "../lib/useIsMobile";
 
 const STADIA_KEY = import.meta.env.PUBLIC_STADIA_API_KEY;
 // Custom "Alidade Smooth, no labels" style. Its tiles/sprite are served by
@@ -77,6 +78,8 @@ function MapView() {
   const reachQuery = useReach(selected?.id ?? null);
   const routesQuery = useRoutes(selected?.id ?? null);
 
+  const isMobile = useIsMobile();
+
   // Ripple the whole station field in, once stations + layer are both ready.
   const playIntro = useCallback(() => {
     const docks = docksRef.current;
@@ -124,6 +127,7 @@ function MapView() {
       zoom: FULL_VIEW.zoom,
       transformRequest,
     });
+    map.setPadding({ top: isMobile ? 250 : 0, bottom: 0, left: 0, right: 0 });
     mapRef.current = map;
     docksRef.current = new DockController(map);
     tripsRef.current = new TripLines(map);
@@ -331,19 +335,19 @@ function MapView() {
       <div className="fixed inset-0 pointer-events-none">
         <div className="m-4 flex justify-center flex flex-col gap-3 md:w-md">
           <MapHeader />
-          <SearchBar
-            stations={stations}
-            mapCenter={mapRef.current?.getCenter()}
-            onSelect={handleSelect}
-            onClear={() => {
-              markerRef.current?.remove();
-              markerRef.current = null;
-            }}
-          />
+          {phase === "intro" && (
+            <SearchBar
+              stations={stations}
+              mapCenter={mapRef.current?.getCenter()}
+              onSelect={handleSelect}
+              onClear={() => {
+                markerRef.current?.remove();
+                markerRef.current = null;
+              }}
+            />
+          )}
         </div>
       </div>
-      {/* Step caption + prev/next controls — phase-driven, shown during the story. */}
-      <Narrator />
     </>
   );
 }
@@ -355,15 +359,20 @@ const MapHeader: React.FC = () => {
   const phase = useApp((s) => s.phase);
   const selected = useApp((s) => s.selected);
 
-  if (phase === "intro" || !selected)
+  return (
+    <div className="rounded-xl bg-white/85 px-6 py-4 shadow-lg backdrop-blur">
+      <span className="block text-2xl font-semibold text-gray-900">
+        Where can a Citi Bike take you?
+      </span>
+      <Narrator />
+    </div>
+  );
+
+  if (phase === "selected")
     return (
       <div className="rounded-xl bg-white/85 px-6 py-4 shadow-lg backdrop-blur">
         <span className="block text-2xl font-semibold text-gray-900">
           Where can a Citi Bike take you?
-        </span>
-        <span className="mt-2 block text-base text-gray-600">
-          Click any station to ride out from it — or, search for a station or
-          address
         </span>
       </div>
     );
