@@ -334,7 +334,12 @@ function MapView() {
 
       <div className="fixed inset-0 pointer-events-none">
         <div className="m-4 flex justify-center flex flex-col gap-3 md:w-md">
-          <MapHeader />
+          <div className="rounded-xl bg-white/85 px-6 pt-4 pb-1 shadow-lg backdrop-blur">
+            <span className="block text-2xl font-semibold text-gray-900">
+              Where can a Citi Bike take you?
+            </span>
+            <Narrator />
+          </div>
           {phase === "intro" && (
             <SearchBar
               stations={stations}
@@ -351,40 +356,3 @@ function MapView() {
     </>
   );
 }
-
-const MapHeader: React.FC = () => {
-  // One selector per field. A selector returning an object literal builds a new
-  // reference every run, and zustand v5 compares snapshots by identity — so it
-  // would re-render, reselect, and loop until React bails out.
-  const phase = useApp((s) => s.phase);
-  const selected = useApp((s) => s.selected);
-
-  return (
-    <div className="rounded-xl bg-white/85 px-6 py-4 shadow-lg backdrop-blur">
-      <span className="block text-2xl font-semibold text-gray-900">
-        Where can a Citi Bike take you?
-      </span>
-      <Narrator />
-    </div>
-  );
-
-  if (phase === "selected")
-    return (
-      <div className="rounded-xl bg-white/85 px-6 py-4 shadow-lg backdrop-blur">
-        <span className="block text-2xl font-semibold text-gray-900">
-          Where can a Citi Bike take you?
-        </span>
-      </div>
-    );
-  if (phase === "near")
-    return (
-      <div className="rounded-xl bg-white/85 px-6 py-4 shadow-lg backdrop-blur">
-        <span className="block text-2xl font-semibold text-gray-900">
-          This is how far a $3.00 ride on a Citi Bike can take you
-          currently. {" "}
-        </span>
-      </div>
-    );
-
-  return null;
-};

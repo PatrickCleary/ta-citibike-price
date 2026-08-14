@@ -4,6 +4,7 @@ import { useMapStore, useSetMapInteractive } from "../lib/mapStore";
 import { useResetMap } from "../lib/mapControl";
 import { ORIGIN_EASE_MS } from "../lib/constants";
 import NarrationBlock from "./NarrationBlock";
+import { AnimatePresence, motion } from "motion/react";
 
 const BTN =
   "pointer-events-auto mt-2 inline-flex items-center px-4 py-2 cursor-pointer border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:cursor-default disabled:bg-gray-300 disabled:pointer-events-none";
@@ -12,6 +13,29 @@ const BTN =
 // stays the obvious next move.
 const BTN_ALT =
   "pointer-events-auto mt-2 inline-flex items-center px-4 py-2 cursor-pointer border border-gray-300 text-sm font-medium rounded-md shadow-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:cursor-default disabled:border-gray-200 disabled:text-gray-400 disabled:pointer-events-none";
+
+const STATE_RANKS = {
+  intro: 0,
+  selected: 1,
+  near: 2,
+  far: 3,
+  final: 4,
+};
+
+const slideVariants = {
+  enter: (direction: number) => ({
+    x: direction > 0 ? "20%" : "-20%",
+    opacity: 0,
+  }),
+  center: {
+    x: 0,
+    opacity: 1,
+  },
+  exit: (direction: number) => ({
+    x: direction > 0 ? "-20%" : "20%",
+    opacity: 0,
+  }),
+};
 
 // Floating caption + step controls. Each step shows a caption and an explicit
 // play/next button; the two draw-out steps (`near`, `far`) trigger the animation
@@ -26,6 +50,17 @@ export default function Narrator() {
   const [busy, setBusy] = useState(false);
   const [hidden, setHidden] = useState(false);
   const setMapInteractive = useSetMapInteractive();
+
+  const [prevPhase, setPrevPhase] = useState(phase);
+  const [direction, setDirection] = useState(0);
+
+  if (phase !== prevPhase) {
+    const currentRank = STATE_RANKS[prevPhase];
+    const nextRank = STATE_RANKS[phase];
+
+    setDirection(nextRank > currentRank ? 1 : -1);
+    setPrevPhase(phase);
+  }
 
   // Gate the controls for the duration of the selection flyTo (see mapControl)
   // so a draw-out can't start before the camera settles on the origin.
@@ -72,133 +107,166 @@ export default function Narrator() {
 
   return (
     <div className="pointer-events-auto flex flex-col gap-1">
-      {!hidden ? (
-        <div className="flex flex-col gap-3 mt-2">
-          {phase === "intro" && (
-            <>
-              <p>
-                Use this tool to see how far you can get with{" "}
-                <strong>$3</strong> on a Citi Bike E-bike with a membership.
-              </p>
-              <p>
-                To get started, find a station on the map or use the search bar.
-              </p>
-            </>
-          )}
-          {phase === "selected" && selected && (
-            <>
-              <p>
-                How far can <strong>$3</strong> get you today? Use the button
-                below to show you how far you can go — about 11 minutes of
-                riding at $0.27 per minute.
-              </p>
-              <div className="flex gap-2">
-                <button
-                  className={BTN}
-                  disabled={busy}
-                  onClick={() => play("near")}
-                >
-                  Travel from {selected.name}
-                </button>
-                <button
-                  className={BTN_ALT}
-                  disabled={busy}
-                  onClick={() => resetMap()}
-                >
-                  Back
-                </button>
-              </div>
-            </>
-          )}
-
-          {phase === "near" && (
-            <>
-              <p>
-                That's not very far at all — does that get you to work, to your
-                friends' apartments, or even to Bushwick's 3 Dollar Bill?
-              </p>
-              <p>
-                Next, use the button below to see how far you could get for the
-                same price if we <strong>capped the fares at $3</strong> for a
-                45-minute ride.
-              </p>
-              <div className="flex gap-2">
-                <button
-                  className={BTN_ALT}
-                  disabled={busy}
-                  onClick={() => replay("near")}
-                >
-                  Replay
-                </button>
-                <button
-                  className={BTN}
-                  disabled={busy}
-                  onClick={() => play("far")}
-                >
-                  Cap the fares
-                </button>
-              </div>
-            </>
-          )}
-
-          {phase === "far" && (
-            <>
-              <p>This is how far you could ride.</p>
-              <p>
-                That's a huge difference in how far you can get for the same
-                price!
-              </p>
-              <div className="flex gap-2">
-                <button
-                  className={BTN_ALT}
-                  disabled={busy}
-                  onClick={() => replay("far")}
-                >
-                  Replay
-                </button>
-                <button
-                  className={BTN}
-                  disabled={busy}
-                  onClick={() => advance()}
-                >
-                  Amazing — let's make it happen
-                </button>
-              </div>
-            </>
-          )}
-
-          {phase === "final" && (
-            <>
-              <p>
-                Placeholder for TA copy about the campaign and links to
-                resources, etc.
-              </p>
-              <div className="flex gap-2">
-                <button className={BTN} onClick={restart}>
-                  Replay
-                </button>
-                <button className={BTN} onClick={() => resetMap()}>
-                  Pick another station
-                </button>
-              </div>
-            </>
-          )}
-          <button
-            className="w-full flex justify-center md:hidden"
-            onClick={() => setHidden(true)}
+      <AnimatePresence initial={false}>
+        {!hidden && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.3, ease: "easeInOut" }}
+            style={{ overflow: "hidden" }}
           >
-            <svg width="2em" height="2em" viewBox="0 0 24 24">
-              <path d="M0 0h24v24H0z" fill="none" />
-              <path
-                fill="currentColor"
-                d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6l-6 6z"
-              />
-            </svg>
-          </button>
-        </div>
-      ) : (
+            <div className="flex flex-col w-full mt-2 md:mb-2">
+              <AnimatePresence initial={false} custom={direction} mode="wait">
+                <motion.div
+                  key={phase} // Triggers animation when Zustand phase updates
+                  custom={direction}
+                  variants={slideVariants}
+                  initial="enter"
+                  animate="center"
+                  exit="exit"
+                  transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                  }}
+                >
+                  {phase === "intro" && (
+                    <>
+                      <p>
+                        Use this tool to see how far you can get with{" "}
+                        <strong>$3</strong> on a Citi Bike E-bike with a
+                        membership.
+                      </p>
+                      <p>
+                        To get started, find a station on the map or use the
+                        search bar.
+                      </p>
+                    </>
+                  )}
+                  {phase === "selected" && selected && (
+                    <>
+                      <p>
+                        How far can <strong>$3</strong> get you today? Use the
+                        button below to show you how far you can go — about 11
+                        minutes of riding at $0.27 per minute.
+                      </p>
+                      <div className="flex gap-2">
+                        <button
+                          className={BTN}
+                          disabled={busy}
+                          onClick={() => play("near")}
+                        >
+                          Travel from {selected.name}
+                        </button>
+                        <button
+                          className={BTN_ALT}
+                          disabled={busy}
+                          onClick={() => resetMap()}
+                        >
+                          Back
+                        </button>
+                      </div>
+                    </>
+                  )}
+
+                  {phase === "near" && (
+                    <>
+                      <p>
+                        That's not very far at all — does that get you to work,
+                        to your friends' apartments, or even to Bushwick's 3
+                        Dollar Bill?
+                      </p>
+                      <p>
+                        Next, use the button below to see how far you could get
+                        for the same price if we{" "}
+                        <strong>capped the fares at $3</strong> for a 45-minute
+                        ride.
+                      </p>
+                      <div className="flex gap-2">
+                        <button
+                          className={BTN_ALT}
+                          disabled={busy}
+                          onClick={() => replay("near")}
+                        >
+                          Replay
+                        </button>
+                        <button
+                          className={BTN}
+                          disabled={busy}
+                          onClick={() => play("far")}
+                        >
+                          Cap the fares
+                        </button>
+                      </div>
+                    </>
+                  )}
+
+                  {phase === "far" && (
+                    <>
+                      <p>This is how far you could ride.</p>
+                      <p>
+                        That's a huge difference in how far you can get for the
+                        same price!
+                      </p>
+                      <div className="flex gap-2">
+                        <button
+                          className={BTN_ALT}
+                          disabled={busy}
+                          onClick={() => replay("far")}
+                        >
+                          Replay
+                        </button>
+                        <button
+                          className={BTN}
+                          disabled={busy}
+                          onClick={() => advance()}
+                        >
+                          Amazing — let's make it happen
+                        </button>
+                      </div>
+                    </>
+                  )}
+
+                  {phase === "final" && (
+                    <>
+                      <p>
+                        Placeholder for TA copy about the campaign and links to
+                        resources, etc.
+                      </p>
+                      <div className="flex gap-2">
+                        <button className={BTN} onClick={restart}>
+                          Replay
+                        </button>
+                        <button className={BTN} onClick={() => resetMap()}>
+                          Pick another station
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </motion.div>
+              </AnimatePresence>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      {!hidden && (
         <button
-          className="w-full flex justify-center md:hidden"
+          className="w-full flex justify-center md:hidden text-gray-400"
+          onClick={() => setHidden(true)}
+        >
+          <svg width="2em" height="2em" viewBox="0 0 24 24">
+            <path d="M0 0h24v24H0z" fill="none" />
+            <path
+              fill="currentColor"
+              d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6l-6 6z"
+            />
+          </svg>
+        </button>
+      )}
+      {hidden && (
+        <button
+          className="w-full flex justify-center md:hidden text-gray-400"
           onClick={() => setHidden(false)}
         >
           <svg width="2em" height="2em" viewBox="0 0 24 24">
