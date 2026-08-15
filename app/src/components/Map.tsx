@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import useMeasure from "react-use-measure";
 import { CONTOURS } from "../lib/sheds";
 import {
   DockController,
@@ -30,6 +31,7 @@ import { FULL_VIEW } from "../lib/constants";
 import Narrator from "./Narrator";
 import { SearchBar, type Suggestion } from "./SearchBar";
 import { useIsMobile } from "../lib/useIsMobile";
+import { motion } from "motion/react";
 
 const STADIA_KEY = import.meta.env.PUBLIC_STADIA_API_KEY;
 // Custom "Alidade Smooth, no labels" style. Its tiles/sprite are served by
@@ -323,6 +325,8 @@ function MapView() {
       : String(reachQuery.error)
     : null;
 
+  const [ref, { height }] = useMeasure();
+
   return (
     <>
       {/* Full-screen map behind everything. */}
@@ -334,12 +338,20 @@ function MapView() {
 
       <div className="fixed inset-0 pointer-events-none">
         <div className="m-4 flex justify-center flex flex-col gap-3 md:w-md">
-          <div className="rounded-xl bg-white/85 px-6 pt-4 pb-1 shadow-lg backdrop-blur">
-            <span className="block text-2xl font-semibold text-gray-900">
-              Where can a Citi Bike take you?
-            </span>
-            <Narrator />
-          </div>
+          <motion.div
+            // 2. Animate the parent height to match the child's height
+            animate={{ height: height > 0 ? height + 24 : "auto" }}
+            transition={{ type: "spring", stiffness: 300, damping: 30 }}
+            style={{ overflow: "hidden" }} // Prevents text bleeding out during animation
+            className="rounded-xl bg-white/85 px-6 pt-4 pb-1 shadow-lg backdrop-blur"
+          >
+            <div ref={ref}>
+              <span className="block text-2xl font-semibold text-gray-900">
+                Where can a Citi Bike take you?
+              </span>
+              <Narrator />
+            </div>
+          </motion.div>
           {phase === "intro" && (
             <SearchBar
               stations={stations}
