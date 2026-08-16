@@ -2,6 +2,7 @@
 import "../styles/global.css";
 import Map from "../components/Map.tsx";
 import Analytics from "@vercel/analytics/astro";
+import data from "../data/stations.json"
 ---
 
 <!doctype html>
@@ -20,7 +21,7 @@ import Analytics from "@vercel/analytics/astro";
   </head>
   <body>
     <main>
-      <Map client:only="react" />
+      <Map serverData={data} client:only="react" />
       <Analytics />
     </main>
   </body>

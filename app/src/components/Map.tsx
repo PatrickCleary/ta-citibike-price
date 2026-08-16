@@ -32,6 +32,7 @@ import Narrator from "./Narrator";
 import { SearchBar, type Suggestion } from "./SearchBar";
 import { useIsMobile } from "../lib/useIsMobile";
 import { motion } from "motion/react";
+import type { FeatureCollection, Point } from "geojson";
 
 const STADIA_KEY = import.meta.env.PUBLIC_STADIA_API_KEY;
 // Custom "Alidade Smooth, no labels" style. Its tiles/sprite are served by
@@ -50,15 +51,19 @@ const transformRequest: maplibregl.RequestTransformFunction = (url) => {
 // One react-query client for the whole island.
 const queryClient = new QueryClient();
 
-export default function Map() {
+export default function Map({
+  serverData,
+}: {
+  serverData: FeatureCollection<Point>;
+}) {
   return (
     <QueryClientProvider client={queryClient}>
-      <MapView />
+      <MapView serverData={serverData} />
     </QueryClientProvider>
   );
 }
 
-function MapView() {
+function MapView({ serverData }: { serverData: FeatureCollection<Point> }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const docksRef = useRef<DockController | null>(null);
@@ -150,28 +155,23 @@ function MapView() {
     map.dragRotate.disable();
     map.touchPitch.disable();
 
-    fetch("/stations.geojson")
-      .then((r) => r.json())
-      .then((fc) => {
-        const list: StationPoint[] = [];
-        for (const f of fc.features) {
-          const id = f.properties?.station_id;
-          const name = f.properties?.name;
-          const [lon, lat] = f.geometry?.coordinates ?? [];
-          if (
-            typeof id === "string" &&
-            typeof name === "string" &&
-            typeof lon === "number"
-          ) {
-            list.push({ id, name, lon, lat });
-            coordsRef.current.set(id, [lon, lat]);
-          }
-        }
-        docksRef.current?.setStations(list);
-        setStations(list);
-        playIntro();
-      })
-      .catch(() => {});
+    const list: StationPoint[] = [];
+    for (const f of serverData.features) {
+      const id = f.properties?.station_id;
+      const name = f.properties?.name;
+      const [lon, lat] = f.geometry?.coordinates ?? [];
+      if (
+        typeof id === "string" &&
+        typeof name === "string" &&
+        typeof lon === "number"
+      ) {
+        list.push({ id, name, lon, lat });
+        coordsRef.current.set(id, [lon, lat]);
+      }
+    }
+    docksRef.current?.setStations(list);
+    setStations(list);
+    playIntro();
 
     map.on("load", async () => {
       map.addSource(DOCKS_SOURCE, {
