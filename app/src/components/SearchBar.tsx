@@ -2,6 +2,9 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { createStationSearcher } from "../lib/stationSearch";
 import { searchAddresses } from "../lib/geocodeSearch";
 import type { StationPoint } from "../lib/dockController";
+import { useQuery } from "@tanstack/react-query";
+import { useDebounce } from "../lib/useDebounce";
+import type { LngLat } from "maplibre-gl";
 
 export type Suggestion =
   | { type: "station"; id: string; label: string; lat: number; lon: number }
@@ -21,8 +24,6 @@ export function SearchBar({
   onClear,
 }: SearchBarProps) {
   const [query, setQuery] = useState("");
-  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
-  const [loading, setLoading] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
   const [open, setOpen] = useState(false);
 
@@ -30,15 +31,13 @@ export function SearchBar({
     () => createStationSearcher(stations),
     [stations],
   );
-  const abortRef = useRef<AbortController | null>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const inputRef = useRef<HTMLInputElement>(null);
-  const skipNextSearch = useRef(false);
+  const [skipNextSearch, setSkipNextSearch] = useState(false);
+
+  const debouncedInput = useDebounce(query, 100);
 
   const runSearch = useCallback(
-    async (q: string) => {
-      if (q.length < 3) return;
-
+    async (q: string, mapCenter?: LngLat) => {
       const stationResults: Suggestion[] = searchStations(q, 5).map((s) => ({
         type: "station",
         id: s.id,
@@ -46,58 +45,51 @@ export function SearchBar({
         lat: s.lat,
         lon: s.lon,
       }));
-      setOpen(true);
+      const addressResults = await searchAddresses(q, mapCenter);
 
-      abortRef.current?.abort();
-      const controller = new AbortController();
-      abortRef.current = controller;
+      const merged: Suggestion[] = [
+        ...stationResults,
+        ...addressResults.map((a) => ({
+          type: "address" as const,
+          id: a.id,
+          label: a.label,
+          lat: a.lat,
+          lon: a.lon,
+        })),
+      ];
 
-      setLoading(true);
-      try {
-        const addressResults = await searchAddresses(
-          q,
-          mapCenter,
-          controller.signal,
-        );
-        const merged: Suggestion[] = [
-          ...stationResults,
-          ...addressResults.map((a) => ({
-            type: "address" as const,
-            id: a.id,
-            label: a.label,
-            lat: a.lat,
-            lon: a.lon,
-          })),
-        ];
-        setSuggestions(merged.slice(0, 10));
-      } catch (err: any) {
-        if (err.name !== "AbortError") console.error(err);
-      } finally {
-        setLoading(false);
-      }
+      return merged;
     },
     [mapCenter, searchStations],
   );
 
-  useEffect(() => {
-    clearTimeout(debounceRef.current);
+  const { data, isLoading } = useQuery({
+    queryKey: ["searchSuggestions", debouncedInput],
+    queryFn: () => runSearch(debouncedInput, mapCenter),
+    enabled: debouncedInput.trim().length >= 3 && !skipNextSearch,
+    staleTime: 1000 * 60 * 5,
+  });
 
-    if (skipNextSearch.current) {
-      skipNextSearch.current = false;
-      return;
+  const suggestions = data ?? [];
+
+  useEffect(() => {
+    if (suggestions.length) {
+      setOpen(true);
+    }
+  }, [suggestions]);
+
+  useEffect(() => {
+    if (skipNextSearch) {
+      setSkipNextSearch(false);
     }
 
     if (!query) {
-      setSuggestions([]);
       setOpen(false);
-      return;
     }
-    debounceRef.current = setTimeout(() => runSearch(query), 250);
-    return () => clearTimeout(debounceRef.current);
   }, [query]);
 
   const handleSelect = (s: Suggestion) => {
-    skipNextSearch.current = true;
+    setSkipNextSearch(true);
     onSelect(s);
     setQuery(s.label);
     setOpen(false);
@@ -154,7 +146,7 @@ export function SearchBar({
                     outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
       />
       <div className="absolute inset-y-0 right-0 flex items-center pr-3">
-        {loading ? (
+        {isLoading ? (
           <svg
             className="h-4 w-4 animate-spin text-sky-500"
             fill="none"
@@ -178,7 +170,6 @@ export function SearchBar({
           <button
             onClick={() => {
               setQuery("");
-              setSuggestions([]);
               setOpen(false);
               onClear();
             }}
@@ -237,7 +228,7 @@ export function SearchBar({
       )}
 
       {/* Empty state */}
-      {open && !loading && query.length >= 3 && suggestions.length === 0 && (
+      {open && !isLoading && query.length >= 3 && suggestions.length === 0 && (
         <div
           className="absolute z-20 mt-2 w-full rounded-2xl border border-slate-100 bg-white
                           px-4 py-3 text-sm text-slate-400 shadow-lg ring-1 ring-black/5"
