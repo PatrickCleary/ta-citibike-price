@@ -284,19 +284,24 @@ const iconSizeExpr = (): ExpressionSpecification => [
 ];
 
 // Paint for the station circle layer. Color/stroke come from feature-state
-// (default to the resting look); opacity/radius start settled at full.
-export function stationPaint(): CircleLayerSpecification["paint"] {
+// (default to the resting look). `time` is the wave clock: SETTLED is the
+// resting field; 0 is pre-ripple (opacity and radius both 0). The Layer must
+// mount at 0 — react-map-gl adds it before `onLoad`, so SETTLED would flash
+// every dock for a frame before start() can tick the clock.
+export function stationPaint(
+  time: number = SETTLED,
+): CircleLayerSpecification["paint"] {
   return {
     "circle-color": ["coalesce", ["feature-state", "color"], BASE_COLOR],
     "circle-stroke-color": ["coalesce", ["feature-state", "stroke"], "#ffffff"],
     "circle-stroke-width": 1,
-    "circle-radius": radiusExpr(SETTLED),
-    "circle-opacity": opacityExpr(SETTLED),
+    "circle-radius": radiusExpr(time),
+    "circle-opacity": opacityExpr(time),
     // The stroke needs the same fade as the fill: it's a separate property that
     // defaults to opaque, so without this the dot's ring survives the cross-fade
     // and hangs around the pin — loudest on the origin, whose stroke is a wide
     // coloured ring rather than a hairline of white.
-    "circle-stroke-opacity": opacityExpr(SETTLED),
+    "circle-stroke-opacity": opacityExpr(time),
   };
 }
 
