@@ -124,6 +124,7 @@ const haloColorExpr = (color: Rgb): ExpressionSpecification =>
   [
     "interpolate", ["linear"], ["heatmap-density"],
     0, rgba(color, 0),
+    HALO_EDGE * 0.85, rgba(color, 0),
     HALO_EDGE, rgba(color, 1),
     1, rgba(color, 1),
   ];

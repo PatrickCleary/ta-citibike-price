@@ -160,7 +160,6 @@ function MapView({
   );
 
   const handleMouseMove = useCallback((e: MapLayerMouseEvent) => {
-    e.target.getCanvas().style.cursor = "pointer";
     const id = e.features?.[0]?.properties?.station_id;
     useHover.getState().setHovered(typeof id === "string" ? id : null);
   }, []);
@@ -268,7 +267,7 @@ function MapView({
               longitude: FULL_VIEW.center[0],
               zoom: FULL_VIEW.zoom,
             }}
-            padding={{ top:  0, bottom: 0, left: 0, right: 0 }}
+            padding={{ top: 0, bottom: 0, left: 0, right: 0 }}
             transformRequest={transformRequest}
             onLoad={handleMapLoad}
             onClick={handleClick}
