@@ -47,6 +47,14 @@ const DOCK_R = 3; // px — settled dot once docked
 const PLOP_MS = 450; // wall-clock duration of the dock plop
 const WHITE: [number, number, number] = [255, 255, 255];
 
+// Auto-fit breathing room, in px. The narrow mobile viewport can't spare much,
+// so it gets a tighter frame than desktop.
+const MOBILE_BREAKPOINT = 768;
+const FIT_PADDING_MOBILE = 20;
+const FIT_PADDING_DESKTOP = 50;
+const fitPadding = () =>
+  window.innerWidth < MOBILE_BREAKPOINT ? FIT_PADDING_MOBILE : FIT_PADDING_DESKTOP;
+
 // Comet tail length, in ride-seconds. Speed is constant (SPEED_MPS), so this is
 // a fixed on-the-ground length: each line is a moving segment of this span that
 // fades out behind the head, so a line fully fades once its head docks.
@@ -282,19 +290,33 @@ export class TripLines {
 
     // Union each drawn point into the accumulated extent (monotonic — never
     // shrinks within a draw), so the camera below only ever eases outward.
+    let grew = false;
     const includePoint = (p: [number, number]) => {
       if (!this.pointBounds) {
         this.pointBounds = [
           [p[0], p[1]],
           [p[0], p[1]],
         ];
+        grew = true;
         return;
       }
       const b = this.pointBounds;
-      if (p[0] < b[0][0]) b[0][0] = p[0];
-      if (p[1] < b[0][1]) b[0][1] = p[1];
-      if (p[0] > b[1][0]) b[1][0] = p[0];
-      if (p[1] > b[1][1]) b[1][1] = p[1];
+      if (p[0] < b[0][0]) {
+        b[0][0] = p[0];
+        grew = true;
+      }
+      if (p[1] < b[0][1]) {
+        b[0][1] = p[1];
+        grew = true;
+      }
+      if (p[0] > b[1][0]) {
+        b[1][0] = p[0];
+        grew = true;
+      }
+      if (p[1] > b[1][1]) {
+        b[1][1] = p[1];
+        grew = true;
+      }
     };
 
     const build = (trips: Trip[], end: number, tier: TierState) => {
@@ -310,7 +332,7 @@ export class TripLines {
         let fill: [number, number, number, number];
         let line: [number, number, number, number];
         if (time < arrival) {
-          pos = positionAt(t, time);
+          pos = positionAt(t, time); 
           includePoint(pos);
 
           radius = TRAVEL_R;
@@ -332,14 +354,11 @@ export class TripLines {
     build(this.nearTrips, this.nearEnd, near);
     build(this.allTrips, this.allEnd, all);
 
-    // Continuously frame the accumulated point extent — but only while a
-    // draw-out tween owns the camera (beginAutoFit). Because pointBounds only
-    // grows, the camera zooms strictly outward as the lines draw; duration 0
-    // means each frame's paint carries the motion (no easing to fight the
-    // per-frame updates).
-    if (this.autoFit && this.pointBounds) {
+    // Frame the accumulated point extent — but only while a draw-out tween owns
+    // the camera (beginAutoFit)
+    if (this.autoFit && this.pointBounds && grew) {
       this.map.fitBounds(this.pointBounds, {
-        padding: 50,
+        padding: fitPadding(),
         duration: 100,
       });
     }
@@ -399,11 +418,22 @@ export class TripLines {
   // Take camera ownership for a draw-out tween: seed the extent from the CURRENT
   // viewport (so framing grows outward from wherever the camera is now — e.g.
   // after the selection flyTo) and enable the per-frame outward fit.
+  //
+  // Remove the padding from the viewport so that the first call to fitBounds doesn't jump the camera unexpectedly.
   beginAutoFit() {
-    const [sw, ne] = this.map.getBounds().toArray();
+    const el = this.map.getContainer();
+    const w = el.clientWidth;
+    const h = el.clientHeight;
+    const p = fitPadding();
+    // Guard a viewport too small to inset (narrow phones, split panes).
+    const px = Math.min(p, Math.max(0, w / 2 - 1));
+    const py = Math.min(p, Math.max(0, h / 2 - 1));
+    // unproject takes CSS pixels — clientWidth/Height, not the DPR-scaled canvas.
+    const sw = this.map.unproject([px, h - py]);
+    const ne = this.map.unproject([w - px, py]);
     this.pointBounds = [
-      [sw[0], sw[1]],
-      [ne[0], ne[1]],
+      [sw.lng, sw.lat],
+      [ne.lng, ne.lat],
     ];
     this.autoFit = true;
   }
