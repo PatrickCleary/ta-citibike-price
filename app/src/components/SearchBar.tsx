@@ -7,6 +7,7 @@ interface SearchBarProps {
   mapCenter?: maplibregl.LngLat;
   onSelect: (result: Suggestion) => void;
   onClear: () => void;
+  
 }
 
 export function SearchBar({ mapCenter, onSelect, onClear }: SearchBarProps) {
