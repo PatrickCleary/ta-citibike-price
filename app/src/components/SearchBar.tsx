@@ -70,10 +70,10 @@ export function SearchBar({ mapCenter, onSelect, onClear }: SearchBarProps) {
   };
 
   return (
-    <div className="relative w-full pointer-events-auto shadow-lg">
+    <div className="relative w-full pointer-events-auto ">
       <div className="absolute inset-y-0 left-0 flex items-center pl-3.5">
         <svg
-          className="h-4 w-4 text-slate-400"
+          className="h-4 w-4 text-ta-orange"
           fill="none"
           stroke="currentColor"
           strokeWidth={2}
@@ -100,9 +100,9 @@ export function SearchBar({ mapCenter, onSelect, onClear }: SearchBarProps) {
           !hasSelectedResult && suggestions.length > 0 && setOpen(true)
         }
         placeholder="Search stations or places…"
-        className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-9
-                    text-sm text-slate-800 placeholder:text-slate-400 shadow-sm
-                    outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
+        className="w-full  py-2.5 pl-10 pr-9 border-ta-orange border rounded-sm border-1/2 bg-white/60
+                    text-sm text-slate-800 placeholder:text-slate-600 
+                    outline-none transition focus:border-ta-orange focus:ring-2 focus:ring-ta-orange/30"
       />
       <div className="absolute inset-y-0 right-0 flex items-center pr-3">
         {isLoading ? (
@@ -155,8 +155,8 @@ export function SearchBar({ mapCenter, onSelect, onClear }: SearchBarProps) {
 
       {open && suggestions.length > 0 && (
         <ul
-          className="absolute z-20 mt-2 max-h-80 w-full overflow-auto rounded-2xl border
-                      border-slate-100 bg-white py-1.5 shadow-lg ring-1 ring-black/5
+          className="absolute z-20 mt-2 max-h-80 w-full overflow-auto  
+                       py-1.5  bg-white/80 ring-1 ring-black/5
                       animate-in fade-in slide-in-from-top-1 duration-150"
         >
           {suggestions.map((s, i) => (
@@ -195,7 +195,7 @@ export function SearchBar({ mapCenter, onSelect, onClear }: SearchBarProps) {
         suggestions.length === 0 && (
           <div
             className="absolute z-20 mt-2 w-full rounded-2xl border border-slate-100 bg-white
-                          px-4 py-3 text-sm text-slate-400 shadow-lg ring-1 ring-black/5"
+                          px-4 py-3 text-sm text-slate-400   ring-1 ring-black/5"
           >
             No results for "{query}"
           </div>

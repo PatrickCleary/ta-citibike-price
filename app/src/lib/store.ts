@@ -19,7 +19,7 @@ export interface Dock {
 // draw-out steps (`near`, `far`) also have an animation the UI's play button
 // triggers. There is no scrubbing — you only ever play a step forward or land
 // on its resting frame (e.g. via reset-to-any-step).
-export type Phase = "intro" | "selected" | "near" | "far" | "final";
+export type Phase = "start" | "intro" | "selected" | "near" | "far" | "final";
 
 // The animated draw-out steps (the ones with a bike-speed tween).
 export type StepKey = "near" | "far";
@@ -69,7 +69,7 @@ export const useHover = create<HoverState>((set) => ({
 export const useApp = create<AppState>((set) => ({
   selected: null,
   setSelected: (s) => set({ selected: s, phase: s ? STEP_ORDER[0] : "intro" }),
-  phase: "intro",
+  phase: "start",
   setPhase: (p) => set({ phase: p }),
   advance: () =>
     set((s) => {

@@ -114,6 +114,7 @@ function MapView({
   // Discrete control state lives in the store; server data in react-query.
   const selected = useApp((s) => s.selected);
   const phase = useApp((s) => s.phase);
+  const setPhase = useApp((s) => s.setPhase);
 
   const reachQuery = useReach(selected?.id ?? null);
   const routesQuery = useRoutes(selected?.id ?? null);
@@ -180,6 +181,7 @@ function MapView({
   }, []);
 
   const handleSelect = useCallback((result: Suggestion) => {
+    setPhase("intro");
     if (result.id && result.label && result.lon && result.lat) {
       mapRef.current?.flyTo({
         center: [result.lon, result.lat],
@@ -325,21 +327,63 @@ function MapView({
         {/* The dock's third look — DOM markers, zoom-gated (StationBubble.tsx). */}
         <StationBubbles stations={stations} />
       </div>
+      {phase === "start" && (
+        <div className="fixed inset-0 rounded-xl bg-white/20 px-6 pt-4 pb-1 backdrop-blur-xs">
+          <div className=" flex flex-col gap-2 mt-8 h-full">
+            <h2 className="text-xl font-bold">
+              How far does $3 get you in NYC?
+            </h2>
+            <p className="text-sm">
+              {" "}
+              Citi Bike is expensive. In just five years, the price to ride an
+              e-bike has tripled. Three dollars is the price of a subway or bus
+              fare, but it only buys 11 minutes on an E-Bike.
+            </p>
+            <div className="flex flex-col mt-8 gap-2">
+              <p className="text-slate-800 italic text-sm text-center">
+                Choose a station to see how far $3 can get you.
+              </p>
+              <SearchBar
+                stations={stations}
+                mapCenter={mapRef.current?.getCenter()}
+                onSelect={handleSelect}
+                onClear={() => {
+                  markerRef.current?.remove();
+                  markerRef.current = null;
+                }}
+              />
+              <button
+                className="text-ta-orange italic underline text-xs mt-2"
+                onClick={() => {
+                  setPhase("intro");
+                  console.log("test");
+                }}
+              >
+                Or find a station on the map{" "}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
-      <div className="fixed inset-0 pointer-events-none">
-        <div className="m-4 flex justify-center flex flex-col gap-3 md:w-md">
+      {/* <div className="fixed inset-0 pointer-events-none">
+        <div className="flex justify-center flex flex-col gap-3 md:w-md">
           <motion.div
             // 2. Animate the parent height to match the child's height
             animate={{ height: height > 0 ? height + 24 : "auto" }}
             transition={{ type: "spring", stiffness: 300, damping: 30 }}
             style={{ overflow: "hidden" }} // Prevents text bleeding out during animation
-            className="rounded-xl bg-white/85 px-6 pt-4 pb-1 shadow-lg backdrop-blur"
+            className="rounded-xl bg-white/20 px-6 pt-4 pb-1 backdrop-blur-xs"
           >
-            <div ref={ref}>
-              <span className="block text-2xl font-semibold text-gray-900">
-                Where can a Citi Bike take you?
-              </span>
-              <Narrator />
+            <div ref={ref}> 
+              {phase === "start" && (
+                <p>
+                  How far does $3 get you in New York City? Citi Bike is too
+                  expensive. In just five years, the price to ride an e-bike has
+                  tripled. $3 is the price of a subway or bus fare, but it will
+                  only buy a Citi Bike member 11 minutes of riding.
+                </p>
+              )}
             </div>
           </motion.div>
           {phase === "intro" && (
@@ -353,7 +397,7 @@ function MapView({
             />
           )}
         </div>
-      </div>
+      </div> */}
     </>
   );
 }

@@ -3,6 +3,10 @@
 
 @theme {
   --font-sans: "Libre Franklin", ui-sans-serif, system-ui, sans-serif;
+
+  /* Mirrors BRAND_ORANGE in src/lib/constants.ts — deck.gl layers need the
+     hex as JS, markup gets it as text-ta-orange / bg-ta-orange / etc. */
+  --color-ta-orange: #f5532b;
 }
 
 html,

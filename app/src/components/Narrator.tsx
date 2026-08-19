@@ -124,6 +124,14 @@ export default function Narrator() {
                   height: "100%",
                 }}
               >
+                {phase === "start" && (
+                  <>
+                    <h2 className="text-xl font-bold">How far does $3 get you in New York City?</h2>
+                    <p>
+                      Citi Bike is too expensive. In just five years, the price to ride an e-bike has tripled. $3 is the price of a subway or bus fare, but it will only buy a Citi Bike member 11 minutes of riding.
+                    </p>
+                  </>
+                )}
                 {phase === "intro" && (
                   <>
                     <p>
