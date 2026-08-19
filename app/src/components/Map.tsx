@@ -268,7 +268,7 @@ function MapView({
               longitude: FULL_VIEW.center[0],
               zoom: FULL_VIEW.zoom,
             }}
-            padding={{ top: isMobile ? 250 : 0, bottom: 0, left: 0, right: 0 }}
+            padding={{ top:  0, bottom: 0, left: 0, right: 0 }}
             transformRequest={transformRequest}
             onLoad={handleMapLoad}
             onClick={handleClick}
