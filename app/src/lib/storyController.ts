@@ -213,7 +213,7 @@ export class StoryController {
       // Each destination's halo blooms as its own line docks, so the region
       // grows with the ride instead of appearing all at once. Same delays feed
       // the dot wave, so the two can't drift apart.
-      halo: bare ? EMPTY : this.trips.destinations(key),
+      halo: bare ? EMPTY : new Set([id, ...this.trips.destinations(key)]),
       delays: bare ? undefined : this.trips.arrivalDelays(key),
       haloColor: tierColor(key),
     });
