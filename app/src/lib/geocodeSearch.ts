@@ -1,43 +1,50 @@
-export interface GeocodeResult {
-  id: string;
-  label: string;
-  lat: number;
-  lon: number;
-}
+import { GeocodingApi } from "@stadiamaps/api";
 
-const STADIA_API_KEY = import.meta.env.PUBLIC_STADIA_API_KEY;
+export type Suggestion =
+  | {
+      type: "station";
+      id?: string;
+      label?: string;
+      stationName?: string;
+      lat?: number;
+      lon?: number;
+    }
+  | {
+      type: "address";
+      id?: string;
+      label?: string;
+      lat?: number;
+      lon?: number;
+    };
+
+const api = new GeocodingApi();
 
 export async function searchAddresses(
   query: string,
-  focusPoint?: maplibregl.LngLat, // bias results near map center
-  signal?: AbortSignal
-): Promise<GeocodeResult[]> {
-  const params = new URLSearchParams({
+  focusPoint?: maplibregl.LngLat,
+): Promise<Array<Suggestion>> {
+  const res = await api.autocomplete({
     text: query,
-    api_key: STADIA_API_KEY,
-    // NYC bounding box
-    'boundary.rect.min_lon': '-74.05',
-    'boundary.rect.min_lat': '40.55',
-    'boundary.rect.max_lon': '-73.7',
-    'boundary.rect.max_lat': '40.92',
-    layers: ['address', 'street', 'venue', 'neighbourhood', 'postalcode'].join(','), 
+    boundaryRectMinLon: -74.05,
+    boundaryRectMinLat: 40.55,
+    boundaryRectMaxLon: -73.7,
+    boundaryRectMaxLat: 40.92,
+    layers: ["address", "street", "venue", "postalcode"],
+    focusPointLat: focusPoint?.lat,
+    focusPointLon: focusPoint?.lng,
   });
 
-  if (focusPoint) {
-    params.set('focus.point.lat', String(focusPoint.lat));
-    params.set('focus.point.lon', String(focusPoint.lng));
-  }
-
-  const res = await fetch(
-    `https://api.stadiamaps.com/geocoding/v1/autocomplete?${params}`,
-    { signal }
-  );
-  const data = await res.json();
-
-  return data.features.map((f: any) => ({
-    id: f.properties.gid,
-    label: f.properties.label,
-    lat: f.geometry.coordinates[1],
-    lon: f.geometry.coordinates[0],
-  }));
+  return res.features.map((f) => {
+    const isStation = f.properties?.name?.toLowerCase().startsWith("citi bike");
+    return {
+      type: isStation ? ("station" as const) : ("address" as const),
+      id: f.properties?.gid,
+      label: f.properties?.label,
+      ...(isStation
+        ? { stationName: f.properties?.name?.replace("Citi Bike - ", "") }
+        : {}),
+      lat: f.geometry?.coordinates[1],
+      lon: f.geometry?.coordinates[0],
+    };
+  });
 }
