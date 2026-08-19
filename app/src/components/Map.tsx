@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import maplibregl, {
   type MapLayerMouseEvent,
   type MapLibreEvent,
@@ -31,7 +31,7 @@ import { StoryController } from "../lib/storyController";
 import { toStation } from "../lib/handlers";
 import { FULL_VIEW } from "../lib/constants";
 import Narrator from "./Narrator";
-import { SearchBar, type Suggestion } from "./SearchBar";
+import { SearchBar } from "./SearchBar";
 import { useIsMobile } from "../lib/useIsMobile";
 import { motion } from "motion/react";
 import type { FeatureCollection, Point } from "geojson";
@@ -41,6 +41,7 @@ import {
   Source,
   type MapRef,
 } from "react-map-gl/maplibre";
+import type { Suggestion } from "../lib/geocodeSearch";
 
 const STADIA_KEY = import.meta.env.PUBLIC_STADIA_API_KEY;
 // Custom "Alidade Smooth, no labels" style. Its tiles/sprite are served by
@@ -85,14 +86,23 @@ function MapView({
   const tripsRef = useRef<TripLines>(null);
   const storyRef = useRef<StoryController>(null);
 
-  const features = serverData.features.map((f) => {
-    const id = f.properties.station_id;
-    const name = f.properties.name;
-    const [lon, lat] = f.geometry.coordinates;
-    return { id, name, lon, lat };
-  });
-  const coords: Map<string, [number, number]> = new Map(
-    features.map((s) => [s.id, [s.lon, s.lat]]),
+  const features = useMemo(
+    () =>
+      serverData.features.map((f) => {
+        const id = f.properties.station_id;
+        const name = f.properties.name;
+        const [lon, lat] = f.geometry.coordinates;
+        return { id, name, lon, lat };
+      }),
+    [serverData],
+  );
+  const coords: Map<string, [number, number]> = useMemo(
+    () => new Map(features.map((s) => [s.id, [s.lon, s.lat]])),
+    [features],
+  );
+  const stationsByName = useMemo(
+    () => new Map(features.map((f) => [f.name, f])),
+    [features],
   );
 
   // Same docks the controller drives, but in React's hands — the bubble layer is
@@ -172,26 +182,31 @@ function MapView({
 
   const handleSelect = useCallback((result: Suggestion) => {
     setPhase("intro");
-    mapRef.current?.flyTo({
-      center: [result.lon, result.lat],
-      zoom: result.type === "station" ? 16 : 15,
-      duration: 800,
-    });
-
-    markerRef.current?.remove();
-    markerRef.current = null;
-
-    if (result.type === "station") {
-      selectStation({
-        id: result.id,
-        name: result.label,
-        lon: result.lon,
-        lat: result.lat,
+    if (result.id && result.label && result.lon && result.lat) {
+      mapRef.current?.flyTo({
+        center: [result.lon, result.lat],
+        zoom: result.type === "station" ? 16 : 15,
+        duration: 800,
       });
-    } else {
-      markerRef.current = new maplibregl.Marker()
-        .setLngLat([result.lon, result.lat])
-        .addTo(mapRef.current!.getMap());
+
+      markerRef.current?.remove();
+      markerRef.current = null;
+
+      if (result.type === "station") {
+        const actualStation = stationsByName.get(result.stationName ?? "");
+        if (actualStation) {
+          selectStation({
+            id: actualStation.id,
+            name: actualStation.name,
+            lon: actualStation.lon,
+            lat: actualStation.lat,
+          });
+        }
+      } else {
+        markerRef.current = new maplibregl.Marker()
+          .setLngLat([result.lon, result.lat])
+          .addTo(mapRef.current!.getMap());
+      }
     }
   }, []);
 
@@ -373,7 +388,6 @@ function MapView({
           </motion.div>
           {phase === "intro" && (
             <SearchBar
-              stations={stations}
               mapCenter={mapRef.current?.getCenter()}
               onSelect={handleSelect}
               onClear={() => {

@@ -1,97 +1,53 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { createStationSearcher } from "../lib/stationSearch";
-import { searchAddresses } from "../lib/geocodeSearch";
-import type { StationPoint } from "../lib/dockController";
+import { useState, useEffect, useRef } from "react";
+import { searchAddresses, type Suggestion } from "../lib/geocodeSearch";
 import { useQuery } from "@tanstack/react-query";
 import { useDebounce } from "../lib/useDebounce";
-import type { LngLat } from "maplibre-gl";
-
-export type Suggestion =
-  | { type: "station"; id: string; label: string; lat: number; lon: number }
-  | { type: "address"; id: string; label: string; lat: number; lon: number };
 
 interface SearchBarProps {
-  stations: StationPoint[];
   mapCenter?: maplibregl.LngLat;
   onSelect: (result: Suggestion) => void;
   onClear: () => void;
 }
 
-export function SearchBar({
-  stations,
-  mapCenter,
-  onSelect,
-  onClear,
-}: SearchBarProps) {
+export function SearchBar({ mapCenter, onSelect, onClear }: SearchBarProps) {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(-1);
   const [open, setOpen] = useState(false);
+  const [hasSelectedResult, setHasSelectedResult] = useState(false);
 
-  const searchStations = useMemo(
-    () => createStationSearcher(stations),
-    [stations],
-  );
   const inputRef = useRef<HTMLInputElement>(null);
-  const [skipNextSearch, setSkipNextSearch] = useState(false);
 
   const debouncedInput = useDebounce(query, 100);
 
-  const runSearch = useCallback(
-    async (q: string, mapCenter?: LngLat) => {
-      const stationResults: Suggestion[] = searchStations(q, 5).map((s) => ({
-        type: "station",
-        id: s.id,
-        label: s.name,
-        lat: s.lat,
-        lon: s.lon,
-      }));
-      const addressResults = await searchAddresses(q, mapCenter);
-
-      const merged: Suggestion[] = [
-        ...stationResults,
-        ...addressResults.map((a) => ({
-          type: "address" as const,
-          id: a.id,
-          label: a.label,
-          lat: a.lat,
-          lon: a.lon,
-        })),
-      ];
-
-      return merged;
-    },
-    [mapCenter, searchStations],
-  );
-
   const { data, isLoading } = useQuery({
     queryKey: ["searchSuggestions", debouncedInput],
-    queryFn: () => runSearch(debouncedInput, mapCenter),
-    enabled: debouncedInput.trim().length >= 3 && !skipNextSearch,
+    queryFn: () => searchAddresses(debouncedInput, mapCenter),
+    enabled: debouncedInput.trim().length >= 3 && !hasSelectedResult,
     staleTime: 1000 * 60 * 5,
   });
 
   const suggestions = data ?? [];
 
   useEffect(() => {
+    if (hasSelectedResult) {
+      setOpen(false);
+      return;
+    }
     if (suggestions.length) {
       setOpen(true);
     }
-  }, [suggestions]);
+  }, [suggestions, hasSelectedResult]);
 
   useEffect(() => {
-    if (skipNextSearch) {
-      setSkipNextSearch(false);
-    }
-
     if (!query) {
       setOpen(false);
     }
   }, [query]);
 
   const handleSelect = (s: Suggestion) => {
-    setSkipNextSearch(true);
+    setHasSelectedResult(true);
     onSelect(s);
-    setQuery(s.label);
+    setQuery(s.label ?? "");
     setOpen(false);
     setActiveIndex(-1);
     inputRef.current?.blur();
@@ -137,9 +93,12 @@ export function SearchBar({
         onChange={(e) => {
           setQuery(e.target.value);
           setActiveIndex(-1);
+          setHasSelectedResult(false);
         }}
         onKeyDown={handleKeyDown}
-        onFocus={() => suggestions.length > 0 && setOpen(true)}
+        onFocus={() =>
+          !hasSelectedResult && suggestions.length > 0 && setOpen(true)
+        }
         placeholder="Search stations or places…"
         className="w-full  py-2.5 pl-10 pr-9 border-ta-orange border rounded-sm border-1/2 bg-white/60
                     text-sm text-slate-800 placeholder:text-slate-600 
@@ -171,6 +130,7 @@ export function SearchBar({
             onClick={() => {
               setQuery("");
               setOpen(false);
+              setHasSelectedResult(false);
               onClear();
             }}
             className="rounded-xl p-0.5 text-slate-400 hover:text-slate-600"
@@ -228,14 +188,18 @@ export function SearchBar({
       )}
 
       {/* Empty state */}
-      {open && !isLoading && query.length >= 3 && suggestions.length === 0 && (
-        <div
-          className="absolute z-20 mt-2 w-full rounded-2xl border border-slate-100 bg-white
+      {open &&
+        !hasSelectedResult &&
+        !isLoading &&
+        query.length >= 3 &&
+        suggestions.length === 0 && (
+          <div
+            className="absolute z-20 mt-2 w-full rounded-2xl border border-slate-100 bg-white
                           px-4 py-3 text-sm text-slate-400   ring-1 ring-black/5"
-        >
-          No results for "{query}"
-        </div>
-      )}
+          >
+            No results for "{query}"
+          </div>
+        )}
     </div>
   );
 }
