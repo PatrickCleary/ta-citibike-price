@@ -14,6 +14,7 @@
     "@astrojs/react": "^4.2.0",
     "@deck.gl/mapbox": "^9.3.4",
     "@mapbox/polyline": "^1.2.1",
+    "@stadiamaps/api": "^9.1.0",
     "@tailwindcss/vite": "^4.0.0",
     "@tanstack/react-query": "^5.101.0",
     "@vercel/analytics": "^1.4.1",
