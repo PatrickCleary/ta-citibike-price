@@ -337,11 +337,15 @@ const haloWeightExpr = (time: number): ExpressionSpecification =>
 // Paint for the region layer. `color` is per-step (emerald for near, indigo for
 // far) — the two tiers never render at once, so one layer recoloured is enough
 // and there's no cross-tier overlap to muddy.
+// `time` must mount at 0, not SETTLED: at SETTLED the bloom clamps to 1, so the
+// whole region flashes on for a frame before start() ticks the clock. Same
+// reason stationPaint mounts at 0.
 export function stationHaloPaint(
   color: Rgb = HALO_DEFAULT,
+  time: number = 0,
 ): HeatmapLayerSpecification["paint"] {
   return {
-    "heatmap-weight": haloWeightExpr(SETTLED),
+    "heatmap-weight": haloWeightExpr(time),
     "heatmap-intensity": 1,
     "heatmap-radius": haloRadiusExpr(),
     "heatmap-color": haloColorExpr(color),
@@ -475,6 +479,11 @@ export class DockController {
     if (this.raf != null) cancelAnimationFrame(this.raf);
     const t0 = performance.now();
     const end = this.endTime;
+    // Paint the zero frame now, not on the first rAF: select() has already
+    // opened the halo filter, but the expressions still carry the last run's
+    // settled time, which would render everything at full for a frame.
+    this.time = 0;
+    this.applyAnim(0);
     const tick = () => {
       const t = performance.now() - t0;
       this.time = t;
