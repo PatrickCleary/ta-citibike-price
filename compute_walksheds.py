@@ -36,6 +36,7 @@ from shapely.ops import unary_union
 VALHALLA = "http://localhost:8002/isochrone"
 WALK_MINUTES = 5
 REACHDIR = "reachable"
+EXCLUDED = "excluded_stations.json"  # never unioned in as a destination
 SHEDDIR = "walksheds"
 OUTDIR = "walkshed_unions"
 WORKERS = 8
@@ -129,11 +130,13 @@ def load_sheds(stations):
 
 # Per-process state for the union workers, set once by init_worker so each
 # task doesn't re-pickle every station's walk shed.
-_stations = _sheds = None
+_stations = _sheds = _excluded = None
 
 
 def init_worker(stations):
-    global _stations, _sheds
+    global _stations, _sheds, _excluded
+    with open(EXCLUDED) as f:
+        _excluded = set(json.load(f)["stations"])
     _stations = stations
     _sheds = {}
     for sid in stations:
@@ -151,7 +154,8 @@ def build_union(origin):
         reach = json.load(f)
     features, summary = [], []
     for t in (11, 45):
-        ids = [origin] + [d for d in reach[str(t)] if d in _stations]
+        ids = [origin] + [d for d in reach[str(t)]
+                          if d in _stations and d not in _excluded]
         geoms = [_sheds[s] for s in ids if s in _sheds]
         if not geoms:
             continue

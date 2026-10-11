@@ -6,3 +6,6 @@ valhalla/valhalla_tiles/
 valhalla/NewYork.osm.pbf
 valhalla/valhalla_tiles.tar
 .DS_Store
+walksheds/
+walkshed_unions/
+.venv/
