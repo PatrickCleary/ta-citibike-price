@@ -20,7 +20,6 @@ import type {
   ExpressionSpecification,
   CircleLayerSpecification,
   SymbolLayerSpecification,
-  HeatmapLayerSpecification,
   FilterSpecification,
   Map,
 } from "maplibre-gl";
@@ -29,13 +28,12 @@ import { BRAND_ORANGE } from "./constants";
 
 export const DOCKS_SOURCE = "stations";
 // The pins get their OWN source, normally tiled — see Map.tsx. DOCKS_SOURCE is
-// pinned to maxzoom 13 for the heatmap's sake, which means a zoomed-in view
-// overzooms one ~5km tile holding every dock in it. Circles don't care (no
-// placement pass); a symbol layer would place hundreds of pins to show ~20.
+// pinned to maxzoom 13, which means a zoomed-in view overzooms one ~5km tile
+// holding every dock in it. Circles don't care (no placement pass); a symbol
+// layer would place hundreds of pins to show ~20.
 export const DOCKS_PIN_SOURCE = "stations-pins";
 export const DOCKS_LAYER = "stations";
 export const DOCKS_ICON_LAYER = "stations-icon";
-export const DOCKS_HALO_LAYER = "stations-halo";
 export const DOCK_ICON_ID = "dock-pin";
 
 // A station_id no dock can have. Filtering a layer to it is how a layer is made
@@ -82,55 +80,6 @@ export const ZOOM_BUBBLE = 16.5;
 // Exported for the same reason as ZOOM_CIRCLE, at the other end: the pin layer's
 // `maxzoom` matches it, because above this the pins are at opacity 0.
 export const ZOOM_BUBBLE_FULL = 16.9;
-
-// --- region halo -----------------------------------------------------------
-// Each arrived dock claims a soft area around it, and together they read as one
-// region. The obvious build — a big translucent circle per dock — doesn't work:
-// alpha compositing SUMS, so two 30% circles stack to 51% and the field turns
-// into a mottled density map, darkest wherever docks cluster. Opacity tuning
-// can't fix that; the overlap has to stop compounding.
-//
-// So this is a heatmap rather than circles. Density still accumulates, but
-// density→colour is a LOOKUP, not a blend — and the ramp below is flat above
-// HALO_EDGE, so every covered pixel resolves to the same colour no matter how
-// many docks cover it. That's a union, and it costs one layer.
-//
-// The pleasant side effect: kernels blend before they threshold, so neighbours
-// merge into one shape (metaball-style) while isolated docks stay their own
-// blob — the region follows the actual street grid and stops at the water.
-const HALO_METERS = 500; // ~dock spacing: neighbours merge, outliers don't
-const HALO_EDGE = 0.01; // density at which a pixel is "covered"
-const HALO_OPACITY = 0.35;
-const HALO_BLOOM_MS = 900; // a dock's halo fades in over this, after arrival
-
-// Web-mercator metres per pixel at zoom 0, at NYC's latitude. Pixels per metre
-// double every zoom level, so a fixed radius on the ground is an exponential-
-// base-2 zoom ramp — anything else and the region breathes as you zoom.
-const MPP_Z0 = 156543.03392 * Math.cos((40.74 * Math.PI) / 180);
-const haloPx = (z: number) => (HALO_METERS * 2 ** z) / MPP_Z0;
-
-// The halo takes an RGB triple rather than this file's hex, because it has to
-// match the TRIP LINE's colour, and tier colours live in tripLines as deck.gl
-// triples. Passed in by the caller: importing tripLines here would be circular.
-export type Rgb = [number, number, number];
-const HALO_DEFAULT: Rgb = [245, 83, 43];
-
-const rgba = ([r, g, b]: Rgb, a: number) => `rgba(${r},${g},${b},${a})`;
-
-// The union ramp. Transparent at zero density, then FLAT — identical colour at
-// HALO_EDGE and at full density. The flatness is the whole point: it's what
-// makes overlaps impossible to see.
-const haloColorExpr = (color: Rgb): ExpressionSpecification =>
-  [
-    "interpolate", ["linear"], ["heatmap-density"],
-    0, rgba(color, 0),
-    HALO_EDGE * 0.85, rgba(color, 0),
-    HALO_EDGE, rgba(color, 1),
-    1, rgba(color, 1),
-  ];
-
-const haloRadiusExpr = (): ExpressionSpecification =>
-  ["interpolate", ["exponential", 2], ["zoom"], 10, haloPx(10), 20, haloPx(20)];
 
 const ICON_URL = "/tmap-icon.svg";
 // The artwork is padded inside its 186×186 viewBox; this is the pin's tight
@@ -183,13 +132,6 @@ export interface Selection {
   // Hide (opacity 0) stations that aren't the origin or in a shown tier,
   // instead of dimming them — they stay clickable but invisible.
   hideOthers?: boolean;
-  // Docks that make up the region halo, and the colour it renders in.
-  // Deliberately NOT derived from near/ring: those style the station DOTS, but
-  // during the story the destination dots are TripLines' deck.gl heads, so
-  // reusing them here would draw a second dot under every head. The halo is
-  // about area only, so it gets its own set.
-  halo?: Set<string>;
-  haloColor?: string;
 }
 
 // --- paint expressions ----------------------------------------------------
@@ -323,36 +265,6 @@ export function stationIconPaint(): SymbolLayerSpecification["paint"] {
   return { "icon-opacity": iconOpacityExpr() };
 }
 
-// A dock contributes to the region only once its trip line has arrived, then
-// blooms in over HALO_BLOOM_MS. Same `delay` feature-state as the dot wave, so
-// the halo and the plop land on the same frame. Non-halo docks weigh 0 and are
-// invisible to the density field entirely.
-const haloWeightExpr = (time: number): ExpressionSpecification =>
-  [
-    "*",
-    ["coalesce", ["feature-state", "halo"], 0],
-    ["interpolate", ["linear"], since(time), 0, 0, HALO_BLOOM_MS, 1],
-  ];
-
-// Paint for the region layer. `color` is per-step (emerald for near, indigo for
-// far) — the two tiers never render at once, so one layer recoloured is enough
-// and there's no cross-tier overlap to muddy.
-// `time` must mount at 0, not SETTLED: at SETTLED the bloom clamps to 1, so the
-// whole region flashes on for a frame before start() ticks the clock. Same
-// reason stationPaint mounts at 0.
-export function stationHaloPaint(
-  color: Rgb = HALO_DEFAULT,
-  time: number = 0,
-): HeatmapLayerSpecification["paint"] {
-  return {
-    "heatmap-weight": haloWeightExpr(time),
-    "heatmap-intensity": 1,
-    "heatmap-radius": haloRadiusExpr(),
-    "heatmap-color": haloColorExpr(color),
-    "heatmap-opacity": HALO_OPACITY,
-  };
-}
-
 export class DockController {
   private map: Map;
   private stations: StationPoint[] = [];
@@ -390,17 +302,9 @@ export class DockController {
 
   // Bake each station's target look + appearance delay into feature-state.
   // Call on a new selection or when the visible tiers change.
-  select({ selectedId, near, ring, showNear, showRing, delays, hideOthers, halo, haloColor }: Selection) {
+  select({ selectedId, near, ring, showNear, showRing, delays, hideOthers }: Selection) {
     const origin = this.byId.get(selectedId);
     if (!origin || !this.map.getLayer(DOCKS_LAYER)) return;
-
-    if (haloColor && this.map.getLayer(DOCKS_HALO_LAYER)) {
-      this.map.setPaintProperty(
-        DOCKS_HALO_LAYER,
-        "heatmap-color",
-        haloColorExpr(haloColor),
-      );
-    }
 
     // Straight-line distance ripple, used when no explicit delays are given.
     const cosLat = Math.cos((origin.lat * Math.PI) / 180);
@@ -427,23 +331,17 @@ export class DockController {
       }
 
       // Origin appears immediately; others use their arrival delay (or the
-      // distance ripple). Hidden dots don't extend the run length — but a halo
-      // dock does even at op 0, since during the story the dots are hidden
-      // (hideOthers) and the region is the only thing the wave is driving.
-      const inHalo = halo?.has(s.id) ? 1 : 0;
+      // distance ripple). Hidden dots don't extend the run length.
       const delay = isSel ? 0 : delays ? (delays.get(s.id) ?? 0) : (dist(s) / max) * WAVE_MS;
-      if (op > 0 || inHalo) maxDelay = Math.max(maxDelay, delay);
+      if (op > 0) maxDelay = Math.max(maxDelay, delay);
 
       this.map.setFeatureState(
         { source: DOCKS_SOURCE, id: s.id },
-        { delay, op, color, stroke, r, halo: inHalo },
+        { delay, op, color, stroke, r },
       );
     }
-    // Only the halo docks reach the heatmap; `bare` frames pass none, so the
-    // pre-draw step draws no region at all rather than 2.4k invisible kernels.
-    this.filterHalo(halo);
 
-    this.endTime = maxDelay + Math.max(FADE_MS, HALO_BLOOM_MS);
+    this.endTime = maxDelay + FADE_MS;
   }
 
   // Intro: ripple the WHOLE station field in at full opacity (no selection),
@@ -451,10 +349,6 @@ export class DockController {
   // picked. Call start() after to play it.
   appearAll(center: [number, number]) {
     if (!this.map.getLayer(DOCKS_LAYER)) return;
-    // The intro has no region — every dock below is halo: 0. Without this the
-    // heatmap still rasterizes all 2.4k kernels, which is what made zooming in
-    // from the intro crawl.
-    this.filterHalo();
     const cosLat = Math.cos((center[1] * Math.PI) / 180);
     const dist = (s: StationPoint) =>
       Math.hypot((s.lon - center[0]) * cosLat, s.lat - center[1]);
@@ -468,7 +362,7 @@ export class DockController {
       maxDelay = Math.max(maxDelay, delay);
       this.map.setFeatureState(
         { source: DOCKS_SOURCE, id: s.id },
-        { delay, op: 0.85, color: BASE_COLOR, stroke: "#ffffff", r: 2.5, halo: 0 },
+        { delay, op: 0.85, color: BASE_COLOR, stroke: "#ffffff", r: 2.5 },
       );
     }
     this.endTime = maxDelay + FADE_MS;
@@ -480,8 +374,8 @@ export class DockController {
     const t0 = performance.now();
     const end = this.endTime;
     // Paint the zero frame now, not on the first rAF: select() has already
-    // opened the halo filter, but the expressions still carry the last run's
-    // settled time, which would render everything at full for a frame.
+    // baked the new feature-state, but the expressions still carry the last
+    // run's settled time, which would render everything at full for a frame.
     this.time = 0;
     this.applyAnim(0);
     const tick = () => {
@@ -512,9 +406,6 @@ export class DockController {
     this.raf = null;
     if (!this.map.getLayer(DOCKS_LAYER)) return;
     this.map.removeFeatureState({ source: DOCKS_SOURCE });
-    // Dropping the state leaves every dock at halo 0, so the region is gone —
-    // but "weighs nothing" and "isn't drawn" are different things here.
-    this.filterHalo();
     this.time = SETTLED;
     this.applyAnim(SETTLED);
   }
@@ -522,28 +413,6 @@ export class DockController {
   dispose() {
     if (this.raf != null) cancelAnimationFrame(this.raf);
     this.raf = null;
-  }
-
-  // Restrict the heatmap to the docks actually in the region; pass an empty set
-  // (or nothing) to draw none at all.
-  //
-  // This is a pure performance guard, and it's the difference between a zoomed-in
-  // view running and crawling. `heatmap-weight` 0 does NOT skip a point: the
-  // kernel quad still rasterizes, it just contributes nothing. The quad is sized
-  // in PIXELS off a 500m ground radius, so it doubles every zoom level —
-  // ~5px across at the intro's zoom 10.3, but ~552px at the origin's zoom 16.
-  // Times 2.4k docks, that's ~300k pixels of invisible fill per dock per frame.
-  //
-  // A filter is the only lever here: feature-state (which is what `halo` lives
-  // in) is illegal inside filters, so the id list has to be inlined.
-  private filterHalo(ids?: Set<string>) {
-    if (!this.map.getLayer(DOCKS_HALO_LAYER)) return;
-    this.map.setFilter(
-      DOCKS_HALO_LAYER,
-      ids?.size
-        ? ["in", ["get", "station_id"], ["literal", [...ids]]]
-        : ["==", ["get", "station_id"], NO_DOCK],
-    );
   }
 
   // Show only `id`'s dock, or pass null to restore the full clickable field.
@@ -597,8 +466,5 @@ export class DockController {
     // iconOpacityExpr) and icon-size is layout, so there is nothing here to
     // drive per frame. Leave it that way — a symbol layer is the most expensive
     // thing on this map to invalidate.
-    if (this.map.getLayer(DOCKS_HALO_LAYER)) {
-      this.map.setPaintProperty(DOCKS_HALO_LAYER, "heatmap-weight", haloWeightExpr(time));
-    }
   }
 }

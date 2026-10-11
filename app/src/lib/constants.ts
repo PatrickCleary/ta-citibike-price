@@ -1,5 +1,5 @@
-// The brand orange. Worn by the dock dots, the region halo, and the station
-// bubbles — they're all the same "this is a dock" signal, so they share a hex.
+// The brand orange. Worn by the dock dots and the station bubbles — they're
+// both the same "this is a dock" signal, so they share a hex.
 export const BRAND_ORANGE = "#F5532B";
 
 // Full-metro view shown before a station is picked.

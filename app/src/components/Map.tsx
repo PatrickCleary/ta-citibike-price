@@ -8,12 +8,10 @@ import useMeasure from "react-use-measure";
 import {
   DockController,
   stationPaint,
-  stationHaloPaint,
   DOCKS_SOURCE,
   DOCKS_PIN_SOURCE,
   DOCKS_LAYER,
   DOCKS_ICON_LAYER,
-  DOCKS_HALO_LAYER,
   ZOOM_CIRCLE,
   ZOOM_BUBBLE_FULL,
   type StationPoint,
@@ -300,11 +298,6 @@ function MapView({
               buffer={512}
             >
               <Layer id={DOCKS_LAYER} type="circle" paint={stationPaint(0)} />
-              <Layer
-                id={DOCKS_HALO_LAYER}
-                type="heatmap"
-                paint={stationHaloPaint()}
-              />
             </Source>
             <Source
               id={DOCKS_PIN_SOURCE}
