@@ -1,6 +1,13 @@
 import { useEffect, useState } from "react";
+import type { StoryController } from "../lib/storyController";
 import { createPortal } from "react-dom";
-import { ChevronLeft, ChevronRight, Play, RotateCcw } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  Play,
+  RotateCcw,
+  Timer,
+} from "lucide-react";
 import { FAR_ONLY, useApp, type Layers, type StepKey } from "../lib/store";
 import { useMapStore, useSetMapInteractive } from "../lib/mapStore";
 import { useResetMap } from "../lib/mapControl";
@@ -112,6 +119,40 @@ function LayerToggle({
           </button>
         );
       })}
+    </div>
+  );
+}
+
+// Ride clock shown while trips draw out: counts 0:00 → the tier's budget,
+// reaching it exactly as the last trip docks. Scaled to the draw-out rather than
+// literal ride time (a few routes run past their tier's minutes), so it always
+// lands on 11:00 / 45:00. Polls the story each frame; only this re-renders.
+const CLOCK_MINUTES: Record<StepKey, number> = { near: 11, far: 45 };
+
+function RideClock({ story }: { story: StoryController }) {
+  const [p, setP] = useState(() => story.rideProgress());
+  useEffect(() => {
+    let raf = requestAnimationFrame(function tick() {
+      setP(story.rideProgress());
+      raf = requestAnimationFrame(tick);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [story]);
+  if (!p) return null;
+
+  const total = CLOCK_MINUTES[p.key] * 60;
+  const secs = Math.floor(Math.min(1, p.frac) * total);
+  const mmss = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
+  const [r, g, b] = rgbOf(p.key);
+  return (
+    <div className="pointer-events-auto inline-flex h-11 items-center gap-2 rounded-full bg-white/90 px-4 shadow-lg backdrop-blur">
+      <Timer size={18} style={{ color: `rgb(${r},${g},${b})` }} />
+      <span className="w-14 text-right text-lg font-semibold tabular-nums text-gray-900">
+        {mmss}
+      </span>
+      <span className="text-sm text-gray-500">
+        / {CLOCK_MINUTES[p.key]} min
+      </span>
     </div>
   );
 }
@@ -231,8 +272,9 @@ export default function Narrator() {
     setHidden(false);
   }, [phase]);
 
-  // The step's own actions, between Back and Next. Hidden while busy (the
-  // selection flyTo, or a draw-out playing) — there's nothing to do then.
+  // The step's own actions, between Back and Next. While busy (the selection
+  // flyTo, or a draw-out playing) the ride clock takes their place instead —
+  // it renders nothing outside a draw-out.
   const actions = (() => {
     switch (phase) {
       case "selected":
@@ -382,17 +424,30 @@ export default function Narrator() {
             </button>
 
             <AnimatePresence mode="wait">
-              {!busy && actions && (
+              {busy && story ? (
                 <motion.div
-                  key={phase}
-                  className="flex min-w-0 shrink items-center gap-2"
+                  key="clock"
+                  className="flex min-w-0 shrink items-center"
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.95 }}
                   transition={{ duration: 0.2 }}
                 >
-                  {actions}
+                  <RideClock story={story} />
                 </motion.div>
+              ) : (
+                actions && (
+                  <motion.div
+                    key={phase}
+                    className="flex min-w-0 shrink items-center gap-2"
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    {actions}
+                  </motion.div>
+                )
               )}
             </AnimatePresence>
 

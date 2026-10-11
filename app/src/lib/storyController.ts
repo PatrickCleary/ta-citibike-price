@@ -25,6 +25,9 @@ export class StoryController {
   // The step whose draw-out is running (or rewinding to replay), so landing on
   // that same step's resting frame (the advance onDone triggers) lets it finish.
   private playing: StepKey | null = null;
+  // How far the running draw-out is towards every trip docking (0→1), for the
+  // UI's ride clock. Null when nothing is drawing.
+  private progress: { key: StepKey; frac: number } | null = null;
   private rewind: ReturnType<typeof setTimeout> | null = null;
   // Which dock styling is currently baked: a StepKey (that step's arrival
   // delays), or "bare" (origin only). Latched so the per-frame renderStep doesn't
@@ -113,6 +116,7 @@ export class StoryController {
     // of this same step (e.g. far's replay resetting the layer toggle) doesn't
     // stop() it and cancel the pending draw-out.
     this.playing = key;
+    this.progress = { key, frac: 0 }; // clock reads 0:00 while the camera rewinds
     this.rewind = setTimeout(() => {
       this.rewind = null;
       this.play(key, onDone);
@@ -143,11 +147,18 @@ export class StoryController {
       this.raf = null;
     }
     this.playing = null;
+    this.progress = null;
     if (this.rewind != null) {
       clearTimeout(this.rewind);
       this.rewind = null;
     }
     this.trips.endAutoFit();
+  }
+
+  // Draw-out progress for the ride clock: polled per frame by the UI rather than
+  // pushed, so only the clock re-renders.
+  rideProgress(): { key: StepKey; frac: number } | null {
+    return this.progress;
   }
 
   // Clear the latch so the next pick re-applies dock styling from scratch.
@@ -178,13 +189,17 @@ export class StoryController {
     const dur = (ride * 1000) / PLAYBACK_SPEEDUP;
     const doneAt = ride > 0 ? this.trips.doneSecondsFor(key) / ride : 1;
     let done = false;
+    this.progress = { key, frac: 0 };
     const t0 = performance.now();
     const tick = (now: number) => {
       const k = dur <= 0 ? 1 : clamp01((now - t0) / dur);
       this.renderStep(key, linear(k));
       if (!done && k >= doneAt) {
         done = true;
+        this.progress = null;
         onDone?.();
+      } else if (!done) {
+        this.progress = { key, frac: k / doneAt };
       }
       if (k < 1) {
         this.raf = requestAnimationFrame(tick);
