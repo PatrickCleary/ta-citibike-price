@@ -15,6 +15,7 @@ import { useMapStore, useSetMapInteractive } from "../lib/mapStore";
 import { useResetMap } from "../lib/mapControl";
 import { ORIGIN_EASE_MS } from "../lib/constants";
 import NarrationBlock from "./NarrationBlock";
+import StoryCopy from "./StoryCopy";
 import { COLOR_ALL, COLOR_NEAR } from "../lib/tripLines";
 import { TIERS } from "../lib/walksheds";
 import { AnimatePresence, motion } from "motion/react";
@@ -31,10 +32,11 @@ const STATE_RANKS = {
   selected: 1,
   near: 2,
   reflect: 3,
-  capped: 4,
-  far: 5,
-  compare: 6,
-  final: 7,
+  subsidy: 4,
+  capped: 5,
+  far: 6,
+  compare: 7,
+  final: 8,
 };
 
 // Map key for a draw-out step: the docked trip dots, and the walkshed fill in
@@ -190,8 +192,9 @@ const slideVariants = {
   }),
 };
 
-// Two pieces: the narration card (top-left, rendered in place — text and
-// legends only) and the bottom control bar (portalled — every control). The bar
+// Three pieces: the narration card (top-left, rendered in place — the legends),
+// the story's narrative beats centred on screen (StoryCopy,
+// portalled), and the bottom control bar (portalled — every control). The bar
 // always has Back/Next, so any step can step to its neighbour; its middle holds
 // the step's own actions — the play buttons, Replay, and the far step's layer
 // toggle — which are separate from navigation. Not mounted in the intro
@@ -205,7 +208,8 @@ export default function Narrator() {
   const setLayers = useApp((s) => s.setLayers);
   const exploring = useApp((s) => s.exploring);
   const setExploring = useApp((s) => s.setExploring);
-  const setPhase = useApp((s) => s.setPhase);
+  const watched = useApp((s) => s.watched);
+  const markWatched = useApp((s) => s.markWatched);
   const story = useMapStore((s) => s.story);
   const resetMap = useResetMap();
   const [busy, setBusy] = useState(false);
@@ -239,6 +243,7 @@ export default function Narrator() {
     setBusy(true);
     const done = () => {
       setBusy(false);
+      markWatched(which);
       advance();
       setMapInteractive(true);
     };
@@ -255,19 +260,14 @@ export default function Narrator() {
     story.replay(which, () => setBusy(false));
   };
 
-  // Start the whole story over: back to the first step, rewinding the camera to
-  // the origin so the near play button draws out from the zoomed-in view again.
-  const restart = () => {
-    if (!story?.rewindToOrigin()) return;
-    setPhase("selected");
-    setBusy(true);
-    setTimeout(() => setBusy(false), ORIGIN_EASE_MS);
-  };
-
   // Navigation. Back from the first step leaves the station entirely. Stepping
   // (rather than playing) past a draw-out lands on its resting frame, so the map
   // is handed back to the user just as a finished draw-out would.
   const goBack = () => (phase === "selected" ? resetMap() : back());
+  // A step that poses a draw-out can't be skipped until it's been watched.
+  const gated =
+    (phase === "selected" && !watched.near) ||
+    (phase === "capped" && !watched.far);
   const goNext = () => {
     advance();
     setMapInteractive(true);
@@ -345,15 +345,10 @@ export default function Narrator() {
         );
       case "final":
         return (
-          <>
-            <button className={ALT_BTN} onClick={restart}>
-              <RotateCcw size={16} />
-              Replay
-            </button>
-            <button className={ALT_BTN} onClick={() => resetMap()}>
-              Pick another station
-            </button>
-          </>
+          <button className={ALT_BTN} onClick={() => resetMap()}>
+            <RotateCcw size={16} />
+            Reset
+          </button>
         );
       default:
         return null;
@@ -381,27 +376,6 @@ export default function Narrator() {
               >
                 {phase === "near" && <Legend steps={["near"]} />}
 
-                {phase === "reflect" && (
-                  <>
-                    <p>
-                      This is how far a $3 ride on a Citi Bike can take you
-                      currently.
-                    </p>
-                    <p>
-                      That’s not very far at all — does that get you to work, to
-                      your friends’ apartments?
-                    </p>
-                  </>
-                )}
-
-                {phase === "capped" && (
-                  <p>
-                    Now, if New York subsidized Citi Bike — like it subsidizes
-                    every bus, train, and ferry — three dollars could get you a
-                    45-minute ride.
-                  </p>
-                )}
-
                 {phase === "far" &&
                   (exploring ? (
                     <p>
@@ -415,22 +389,6 @@ export default function Narrator() {
                     />
                   ))}
 
-                {phase === "compare" && (
-                  <>
-                    <p>This is how far you could ride.</p>
-                    <p>
-                      That's a huge difference in how far you can get for the
-                      same price!
-                    </p>
-                  </>
-                )}
-
-                {phase === "final" && (
-                  <p>
-                    Placeholder for TA copy about the campaign and links to
-                    resources, etc.
-                  </p>
-                )}
               </motion.div>
             </AnimatePresence>
           </div>
@@ -439,6 +397,7 @@ export default function Narrator() {
       {/* The bottom control bar. Portalled out because the card's backdrop-blur
           would otherwise become the containing block for `fixed` and pin it
           inside the card. */}
+      {createPortal(<StoryCopy />, document.body)}
       {createPortal(
         selected && (
           <div className="pointer-events-none fixed inset-x-0 bottom-0 flex items-center justify-center gap-2 p-4 pb-10">
@@ -484,7 +443,8 @@ export default function Narrator() {
               <button
                 className={NAV_BTN}
                 aria-label="Next"
-                disabled={busy}
+                title={gated ? "Watch the animation first" : undefined}
+                disabled={busy || gated}
                 onClick={goNext}
               >
                 <span className="hidden pl-1 md:inline">Next</span>

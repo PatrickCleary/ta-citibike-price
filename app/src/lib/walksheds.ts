@@ -120,3 +120,24 @@ export class WalkshedLayer {
     return this.map.getSource(SOURCE) as GeoJSONSource | undefined;
   }
 }
+
+// [[w, s], [e, n]] around the given tiers' sheds, or null if none are present.
+export function walkshedBounds(
+  data: Walkshed,
+  tiers: (11 | 45)[],
+): [[number, number], [number, number]] | null {
+  let w = Infinity, s = Infinity, e = -Infinity, n = -Infinity;
+  const visit = (c: unknown): void => {
+    if (typeof (c as number[])[0] === "number") {
+      const [x, y] = c as [number, number];
+      if (x < w) w = x;
+      if (x > e) e = x;
+      if (y < s) s = y;
+      if (y > n) n = y;
+    } else (c as unknown[]).forEach(visit);
+  };
+  for (const f of data.features) {
+    if (tiers.includes(f.properties.tier)) visit(f.geometry.coordinates);
+  }
+  return w === Infinity ? null : [[w, s], [e, n]];
+}

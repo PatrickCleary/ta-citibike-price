@@ -26,7 +26,7 @@ import { useReach, useRoutes, useWalkshed } from "../lib/queries";
 import { useSelectStation } from "../lib/mapControl";
 import { useMapStore } from "../lib/mapStore";
 import { StoryController } from "../lib/storyController";
-import { WalkshedLayer } from "../lib/walksheds";
+import { WalkshedLayer, walkshedBounds } from "../lib/walksheds";
 import { toStation } from "../lib/handlers";
 import { BRAND_ORANGE, FULL_VIEW } from "../lib/constants";
 import Narrator from "./Narrator";
@@ -265,6 +265,7 @@ function MapView({
         break;
       case "near":
       case "reflect":
+      case "subsidy":
       case "capped": // the near draw-out stays up until the far one plays
         story.holdNear();
         break;
@@ -296,6 +297,23 @@ function MapView({
   useEffect(() => {
     if (!selected || !walkshedQuery.isSuccess) return;
     shedsRef.current?.setData(walkshedQuery.data);
+
+    // A far-step switch (a fresh pick flies in via selectStation instead):
+    // frame the new origin's shown walksheds, padded clear of the top-left card
+    // and the bottom control bar.
+    const { phase, layers } = useApp.getState();
+    const data = walkshedQuery.data;
+    if (phase !== "far" || !data) return;
+    const tiers = [layers.near && 11, layers.far && 45].filter(Boolean) as (
+      | 11
+      | 45
+    )[];
+    const bounds = walkshedBounds(data, tiers);
+    if (!bounds) return;
+    mapRef.current?.fitBounds(bounds, {
+      padding: { top: 90, bottom: 120, left: 40, right: 40 },
+      duration: 1200,
+    });
   }, [selected, walkshedQuery.isSuccess, walkshedQuery.data]);
 
   const reach = reachQuery.data;

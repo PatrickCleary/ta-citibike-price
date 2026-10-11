@@ -14,7 +14,7 @@ export interface Dock {
   name: string;
 }
 
-// The story is seven discrete, independently re-enterable steps (plus `intro`,
+// The story is eight discrete, independently re-enterable steps (plus `intro`,
 // the pre-selection state). Each step owns a static resting frame; the two
 // draw-out steps (`near`, `far`) also have an animation the UI's play button
 // triggers — from `selected` and `capped` respectively, the steps that pose the
@@ -25,6 +25,7 @@ export type Phase =
   | "selected"
   | "near"
   | "reflect"
+  | "subsidy"
   | "capped"
   | "far"
   | "compare"
@@ -52,6 +53,7 @@ export const STEP_ORDER = [
   "selected",
   "near",
   "reflect",
+  "subsidy",
   "capped",
   "far",
   "compare",
@@ -78,6 +80,11 @@ interface AppState {
    *  any step change turns it off. */
   exploring: boolean;
   setExploring: (on: boolean) => void;
+  /** Draw-outs played through at least once for this pick. The step that
+   *  poses a draw-out (`selected`, `capped`) can't be skipped with Next until
+   *  its animation has been watched. */
+  watched: Record<StepKey, boolean>;
+  markWatched: (k: StepKey) => void;
   /** Tiers shown on the far step (see Layers). */
   layers: Layers;
   setLayers: (l: Layers) => void;
@@ -105,7 +112,10 @@ export const useApp = create<AppState>((set) => ({
       phase: s ? STEP_ORDER[0] : "intro",
       layers: FAR_ONLY,
       exploring: false,
+      watched: { near: false, far: false },
     }),
+  watched: { near: false, far: false },
+  markWatched: (k) => set((s) => ({ watched: { ...s.watched, [k]: true } })),
   switchStation: (s) => set({ selected: s, exploring: false }),
   exploring: false,
   setExploring: (exploring) => set({ exploring }),
