@@ -37,6 +37,8 @@ export default function StationBubbles({
   const map = useMapStore((s) => s.map);
   const phase = useApp((s) => s.phase);
   const selected = useApp((s) => s.selected);
+  const exploring = useApp((s) => s.exploring);
+  const switchStation = useApp((s) => s.switchStation);
   const hoveredId = useHover((s) => s.hoveredId);
   const selectStation = useSelectStation();
 
@@ -46,19 +48,30 @@ export default function StationBubbles({
   );
 
   const intro = phase === "intro";
-  const fieldIds = useFieldStations(map, stations, intro);
+  // The field is pickable in the intro, and on the far step while exploring
+  // (picking a new origin) — there the docks are back on the map too.
+  const field = intro || exploring;
+  const fieldIds = useFieldStations(map, stations, field);
 
-  // Once a station is picked the story owns the map and DockController.isolate
-  // hides every other dock — so the origin is the only bubble, at whatever zoom
-  // the step's camera happens to be at.
+  // Otherwise the story owns the map and DockController.isolate hides every
+  // other dock — so the origin is the only bubble, at whatever zoom the step's
+  // camera happens to be at. While exploring the origin keeps its lead bubble
+  // above the field.
   const shown = useMemo(() => {
-    if (!intro) return selected ? [{ id: selected.id, lead: true }] : [];
-    const out = fieldIds.map((id) => ({ id, lead: false }));
-    if (hoveredId && !fieldIds.includes(hoveredId)) {
+    const origin = selected ? [{ id: selected.id, lead: true }] : [];
+    if (!field) return origin;
+    const out = fieldIds
+      .filter((id) => id !== selected?.id)
+      .map((id) => ({ id, lead: false }));
+    if (
+      hoveredId &&
+      hoveredId !== selected?.id &&
+      !fieldIds.includes(hoveredId)
+    ) {
       out.push({ id: hoveredId, lead: true });
     }
-    return out;
-  }, [intro, selected, fieldIds, hoveredId]);
+    return intro ? out : [...origin, ...out];
+  }, [field, intro, selected, fieldIds, hoveredId]);
 
   if (!map) return null;
   return (
@@ -74,7 +87,16 @@ export default function StationBubbles({
             lead={lead}
             // Above the gate the bubbles ARE the field — they cover the pins, so
             // they have to carry the pick that the pin layer would have.
-            onSelect={intro ? () => selectStation(station) : undefined}
+            onSelect={
+              id === selected?.id && !intro
+                ? undefined
+                : intro
+                  ? () => selectStation(station)
+                  : exploring
+                    ? () =>
+                        switchStation({ id: station.id, name: station.name })
+                    : undefined
+            }
           />
         );
       })}
@@ -170,19 +192,10 @@ function StationBubble({
   // The picked/hovered dock outranks the field it sits in.
   el.style.zIndex = lead ? "1" : "0";
 
-  return createPortal(
-    <Bubble name={station.name} onSelect={onSelect} />,
-    el,
-  );
+  return createPortal(<Bubble name={station.name} onSelect={onSelect} />, el);
 }
 
-function Bubble({
-  name,
-  onSelect,
-}: {
-  name: string;
-  onSelect?: () => void;
-}) {
+function Bubble({ name, onSelect }: { name: string; onSelect?: () => void }) {
   return (
     <div
       className={`flex animate-[bubble-in_150ms_ease-out] flex-col items-center ${

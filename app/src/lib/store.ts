@@ -71,6 +71,13 @@ interface AppState {
   advance: () => void;
   /** Step back through STEP_ORDER; from the first step, return to the intro. */
   back: () => void;
+  /** Swap the picked station in place, keeping the step (far-step exploring).
+   *  Ends exploring — one pick per toggle. */
+  switchStation: (s: Dock) => void;
+  /** Far step: the other docks are up for picking a new origin. Off by default;
+   *  any step change turns it off. */
+  exploring: boolean;
+  setExploring: (on: boolean) => void;
   /** Tiers shown on the far step (see Layers). */
   layers: Layers;
   setLayers: (l: Layers) => void;
@@ -93,23 +100,31 @@ export const useHover = create<HoverState>((set) => ({
 export const useApp = create<AppState>((set) => ({
   selected: null,
   setSelected: (s) =>
-    set({ selected: s, phase: s ? STEP_ORDER[0] : "intro", layers: FAR_ONLY }),
+    set({
+      selected: s,
+      phase: s ? STEP_ORDER[0] : "intro",
+      layers: FAR_ONLY,
+      exploring: false,
+    }),
+  switchStation: (s) => set({ selected: s, exploring: false }),
+  exploring: false,
+  setExploring: (exploring) => set({ exploring }),
   layers: FAR_ONLY,
   setLayers: (layers) => set({ layers }),
   phase: "intro",
-  setPhase: (p) => set({ phase: p }),
+  setPhase: (p) => set({ phase: p, exploring: false }),
   advance: () =>
     set((s) => {
       const i = (STEP_ORDER as readonly Phase[]).indexOf(s.phase);
       return i >= 0 && i < STEP_ORDER.length - 1
-        ? { phase: STEP_ORDER[i + 1] }
+        ? { phase: STEP_ORDER[i + 1], exploring: false }
         : {};
     }),
   back: () =>
     set((s) => {
       const i = (STEP_ORDER as readonly Phase[]).indexOf(s.phase);
       return i <= 0
-        ? { phase: "intro", selected: null }
-        : { phase: STEP_ORDER[i - 1] };
+        ? { phase: "intro", selected: null, exploring: false }
+        : { phase: STEP_ORDER[i - 1], exploring: false };
     }),
 }));

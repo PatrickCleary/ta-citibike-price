@@ -5,8 +5,10 @@ import {
   ChevronLeft,
   ChevronRight,
   Play,
+  MapPin,
   RotateCcw,
   Timer,
+  X,
 } from "lucide-react";
 import { FAR_ONLY, useApp, type Layers, type StepKey } from "../lib/store";
 import { useMapStore, useSetMapInteractive } from "../lib/mapStore";
@@ -201,6 +203,8 @@ export default function Narrator() {
   const back = useApp((s) => s.back);
   const layers = useApp((s) => s.layers);
   const setLayers = useApp((s) => s.setLayers);
+  const exploring = useApp((s) => s.exploring);
+  const setExploring = useApp((s) => s.setExploring);
   const setPhase = useApp((s) => s.setPhase);
   const story = useMapStore((s) => s.story);
   const resetMap = useResetMap();
@@ -222,7 +226,8 @@ export default function Narrator() {
   // Gate the controls for the duration of the selection flyTo (see mapControl)
   // so a draw-out can't start before the camera settles on the origin.
   useEffect(() => {
-    if (!selected) return;
+    // Only a fresh pick flies the camera; a far-step switch stays put.
+    if (!selected || useApp.getState().phase !== "selected") return;
     setBusy(true);
     const id = setTimeout(() => setBusy(false), ORIGIN_EASE_MS);
     return () => clearTimeout(id);
@@ -308,14 +313,33 @@ export default function Narrator() {
       case "far":
         return (
           <>
-            <LayerToggle layers={layers} onChange={setLayers} />
+            {!exploring && (
+              <>
+                <LayerToggle layers={layers} onChange={setLayers} />
+                <button
+                  className={NAV_BTN}
+                  aria-label="Replay"
+                  title="Replay"
+                  onClick={() => replay("far")}
+                >
+                  <RotateCcw size={16} />
+                </button>
+              </>
+            )}
+            {/* One-shot: on, pick a dock on the map, and it switches off. */}
             <button
               className={NAV_BTN}
-              aria-label="Replay"
-              title="Replay"
-              onClick={() => replay("far")}
+              aria-pressed={exploring}
+              aria-label={
+                exploring ? "Cancel picking a station" : "Pick another station"
+              }
+              title={exploring ? "Cancel" : "Pick another station"}
+              onClick={() => setExploring(!exploring)}
             >
-              <RotateCcw size={16} />
+              {exploring ? <X size={16} /> : <MapPin size={16} />}
+              <span className="hidden pr-1 md:inline">
+                {exploring ? "Cancel" : "Another station"}
+              </span>
             </button>
           </>
         );
@@ -378,13 +402,18 @@ export default function Narrator() {
                   </p>
                 )}
 
-                {phase === "far" && (
-                  <Legend
-                    steps={(["near", "far"] as StepKey[]).filter(
-                      (k) => layers[k],
-                    )}
-                  />
-                )}
+                {phase === "far" &&
+                  (exploring ? (
+                    <p>
+                      Tap any station on the map to see how far it gets you.
+                    </p>
+                  ) : (
+                    <Legend
+                      steps={(["near", "far"] as StepKey[]).filter(
+                        (k) => layers[k],
+                      )}
+                    />
+                  ))}
 
                 {phase === "compare" && (
                   <>

@@ -33,7 +33,11 @@ export class StoryController {
   // delays), or "bare" (origin only). Latched so the per-frame renderStep doesn't
   // re-bake 2.4k feature-states every tick — but keyed by step, not just by pick,
   // because each step bakes different delays.
-  private applied: StepKey | "bare" | null = null;
+  private applied: string | null = null;
+  // Far step, toggled on: the other docks are back on the map (dimmed,
+  // clickable) so a new origin can be picked from it. Every other entry point
+  // resets this via stop(); holdFar sets it.
+  private explore = false;
 
   constructor(
     private map: maplibregl.Map,
@@ -76,21 +80,26 @@ export class StoryController {
   // `layers` is the far step's tier toggle. The default (≤45 only) is exactly
   // the draw-out's last frame, so it lets an in-flight draw-out finish fading;
   // any other choice takes over immediately.
-  holdFar(layers: Layers = FAR_ONLY) {
-    const isDefault = !layers.near && layers.far;
+  //
+  // `explore` clears the trips and sheds and brings the other docks back
+  // (dimmed, clickable) for picking a new origin.
+  holdFar(layers: Layers = FAR_ONLY, explore = false) {
+    const isDefault = !layers.near && layers.far && !explore;
     if (this.playing === "far" && isDefault) return;
     this.stop();
+    this.explore = explore;
     if (!this.hasOrigin()) return this.showIntro();
     if (isDefault) return this.renderStep("far", 1);
 
     const id = this.selectedId()!;
+    const shown = explore ? { near: false, far: false } : layers;
     this.isolateOrigin(id);
     this.ensureDockStyling(id, "far", 1, false);
     this.trips.setTiers(
-      { visible: layers.near, progress: 1, opacity: 1 }, // baked orange
-      { visible: layers.far, progress: 1, opacity: 1, color: COLOR_ALL },
+      { visible: shown.near, progress: 1, opacity: 1 }, // baked orange
+      { visible: shown.far, progress: 1, opacity: 1, color: COLOR_ALL },
     );
-    this.sheds.showTiers(layers);
+    this.sheds.showTiers(shown);
   }
 
   // ── Draw-out animations (triggered by the UI's play buttons) ────────────────
@@ -148,6 +157,7 @@ export class StoryController {
     }
     this.playing = null;
     this.progress = null;
+    this.explore = false;
     if (this.rewind != null) {
       clearTimeout(this.rewind);
       this.rewind = null;
@@ -245,7 +255,7 @@ export class StoryController {
   // restore the full clickable field (the intro). DockController owns the
   // filtering itself now that a dock draws on two layers (dot + pin).
   private isolateOrigin(id: string | null) {
-    this.docks.isolate(id);
+    this.docks.isolate(id, this.explore);
   }
 
   // Bake the origin marker and this step's arrival delays into feature-state,
@@ -254,7 +264,7 @@ export class StoryController {
   // `bare` is the pre-draw frame (showOrigin / rewindToOrigin): origin only —
   // the lines haven't ridden out yet, so nothing has arrived.
   private ensureDockStyling(id: string, key: StepKey, t: number, bare: boolean) {
-    const tag = bare ? "bare" : key;
+    const tag = (bare ? "bare" : key) + (this.explore ? "+explore" : "");
     if (this.applied === tag) return;
     this.applied = tag;
 
@@ -264,8 +274,10 @@ export class StoryController {
       ring: EMPTY,
       showNear: true,
       showRing: true,
-      hideOthers: true,
-      delays: bare ? undefined : this.trips.arrivalDelays(key),
+      // Exploring dims the rest of the field back in (a distance ripple) rather
+      // than hiding it, so the other docks can be clicked.
+      hideOthers: !this.explore,
+      delays: bare || this.explore ? undefined : this.trips.arrivalDelays(key),
     });
 
     // A draw-out starting from the top (t≈0) plays the wave alongside the lines.

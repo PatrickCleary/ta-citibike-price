@@ -117,6 +117,7 @@ function MapView({
   const selected = useApp((s) => s.selected);
   const phase = useApp((s) => s.phase);
   const layers = useApp((s) => s.layers);
+  const exploring = useApp((s) => s.exploring);
 
   const reachQuery = useReach(selected?.id ?? null);
   const routesQuery = useRoutes(selected?.id ?? null);
@@ -170,13 +171,29 @@ function MapView({
 
   const handleClick = useCallback(
     (e: MapLayerMouseEvent) => {
+      // Bubbles are DOM markers inside the map container, so a click on one
+      // also lands here after the bubble has handled it — by which time exploring
+      // has already switched off, and this would restart the story. Only clicks
+      // on the canvas itself are the map's to handle.
+      if (e.originalEvent.target !== e.target.getCanvas()) return;
       const station = toStation(e.features?.[0]);
-      if (station) selectStation(station);
+      if (!station) return;
+      const { phase, exploring, switchStation } = useApp.getState();
+      // While exploring (far step, toggled on) a click swaps the origin in place
+      // — its finished far view, no restart. In the intro it starts the story.
+      // Mid-story the field is hidden, so there's nothing else to pick.
+      if (exploring) {
+        switchStation({ id: station.id, name: station.name });
+      } else if (phase === "intro") {
+        selectStation(station);
+      }
     },
     [selectStation],
   );
 
   const handleMouseMove = useCallback((e: MapLayerMouseEvent) => {
+    // Pointer over anything pickable (pins; dots too while exploring).
+    e.target.getCanvas().style.cursor = e.features?.length ? "pointer" : "";
     const id = e.features?.[0]?.properties?.station_id;
     useHover.getState().setHovered(typeof id === "string" ? id : null);
   }, []);
@@ -229,7 +246,9 @@ function MapView({
   useEffect(() => {
     storyRef.current?.resetPick();
     shedsRef.current?.setData(null);
-    if (!selected) tripsRef.current?.clear();
+    // Also on a far-step switch: drop the old origin's lines rather than leave
+    // them up while the new routes load.
+    tripsRef.current?.clear();
   }, [selected]);
 
   // Landing on a step paints its static resting frame. Draw-out animations are
@@ -250,14 +269,14 @@ function MapView({
         story.holdNear();
         break;
       case "far":
-        story.holdFar(layers);
+        story.holdFar(layers, exploring);
         break;
       case "compare":
       case "final":
         story.holdFar();
         break;
     }
-  }, [phase, layers]);
+  }, [phase, layers, exploring]);
 
   // Routes for the pick arrived → hand them to the trip lines so they're ready
   // to draw when the UI triggers a step. A station with no routes file (data
@@ -267,6 +286,10 @@ function MapView({
     const routes = routesQuery.data;
     if (!routes) return;
     tripsRef.current?.show(routes);
+    // show() resets the tiers to hidden. Normally the next step paints them, but
+    // a far-step switch stays put — so repaint its resting frame now.
+    const { phase, layers, exploring } = useApp.getState();
+    if (phase === "far") storyRef.current?.holdFar(layers, exploring);
   }, [selected, routesQuery.isSuccess, routesQuery.data]);
 
   // Walkshed for the pick arrived → load it; the story decides when it shows.
@@ -294,7 +317,11 @@ function MapView({
         <div className="h-full w-full">
           <MaplibreMap
             ref={mapRef}
-            interactiveLayerIds={[DOCKS_ICON_LAYER]}
+            // Exploring brings the dimmed dock field back as pickable; dots
+            // count there because the far camera usually sits below the pin gate.
+            interactiveLayerIds={
+              exploring ? [DOCKS_LAYER, DOCKS_ICON_LAYER] : [DOCKS_ICON_LAYER]
+            }
             mapStyle={STYLE_URL}
             initialViewState={{
               latitude: FULL_VIEW.center[1],

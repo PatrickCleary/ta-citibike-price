@@ -423,28 +423,28 @@ export class DockController {
   // StationBubble.tsx), at every zoom. So both the dot and the pin are filtered
   // to NO_DOCK rather than to `id`: the bubble is the origin's only look, and
   // the story never pays for the symbol layer at all.
-  isolate(id: string | null) {
-    const filter: FilterSpecification | null = id
-      ? ["==", ["get", "station_id"], NO_DOCK]
-      : null;
-    this.setFilterIfChanged(DOCKS_LAYER, filter, id ? NO_DOCK : null);
-    this.setFilterIfChanged(
-      DOCKS_ICON_LAYER,
-      id ? ["==", ["get", "station_id"], NO_DOCK] : null,
-      id ? NO_DOCK : null,
-    );
+  //
+  // `showOthers` (the far step, where you can pick another origin from the map)
+  // keeps every OTHER dock drawn and clickable — still everything but `id`, so
+  // the origin's bubble stays its only look.
+  isolate(id: string | null, showOthers = false) {
+    const filter: FilterSpecification | null = !id
+      ? null
+      : showOthers
+        ? ["!=", ["get", "station_id"], id]
+        : ["==", ["get", "station_id"], NO_DOCK];
+    this.setFilterIfChanged(DOCKS_LAYER, filter);
+    this.setFilterIfChanged(DOCKS_ICON_LAYER, filter);
   }
 
-  private setFilterIfChanged(
-    layer: string,
-    filter: FilterSpecification | null,
-    wantId: string | null,
-  ) {
+  private setFilterIfChanged(layer: string, filter: FilterSpecification | null) {
     if (!this.map.getLayer(layer)) return;
-    const cur = this.map.getFilter(layer) as unknown[] | undefined;
-    const curId = Array.isArray(cur) ? (cur[2] as string) : null;
-    if (wantId !== curId) this.map.setFilter(layer, filter);
+    const cur = this.map.getFilter(layer) ?? null;
+    if (JSON.stringify(cur) !== JSON.stringify(filter)) {
+      this.map.setFilter(layer, filter);
+    }
   }
+
 
   // --- EXTENSION POINT ----------------------------------------------------
   // Future dock-level UI (hover tooltips / selected-dock cards) belongs here:
