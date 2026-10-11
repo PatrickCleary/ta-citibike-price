@@ -23,7 +23,7 @@ export default function IntroOverlay({
       {/* Same spot as the orange dot that reopens this, so it toggles in place. */}
       <button
         aria-label="Close"
-        className="fixed left-4 top-4 flex size-10 cursor-pointer items-center justify-center rounded-full bg-white text-gray-700 shadow-lg hover:bg-gray-50 hover:text-gray-900"
+        className="fixed left-4 top-4 flex size-[42px] cursor-pointer items-center justify-center rounded-full bg-white text-gray-700 shadow-lg hover:bg-gray-50 hover:text-gray-900"
         onClick={onDismiss}
       >
         <X size={20} />

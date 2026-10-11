@@ -428,7 +428,10 @@ function MapView({
         <button
           aria-label="About this map"
           title="About this map"
-          className="fixed left-4 top-4 z-20 size-10 cursor-pointer rounded-full bg-white shadow-lg ring-2 ring-white transition-transform hover:scale-110"
+          // 38px + a 2px ring = 42px, the search bar's height (py-2.5 + text-sm
+          // line + 1px borders); inset 2px so the ring's outer edge lines up
+          // with the bar's top at 16px.
+          className="fixed left-[18px] top-[18px] z-20 size-[38px] cursor-pointer rounded-full bg-white shadow-lg ring-2 ring-white transition-transform hover:scale-110"
           onClick={() => setSplash(true)}
         >
           {/* TA mark: the arrow is a cut-out, so the white button shows through. */}
@@ -441,12 +444,12 @@ function MapView({
         href="https://www.transalt.org"
         target="_blank"
         rel="noopener noreferrer"
-        className="fixed bottom-3 left-3 rounded-md bg-white/85 px-2 py-1.5 shadow-sm backdrop-blur"
+        className="fixed bottom-3 left-3 hidden rounded-md bg-white/85 px-2 py-1.5 shadow-sm backdrop-blur md:block"
       >
         <img
           src="/ta_logo_RGB_REFRESH_transparent.webp"
           alt="Transportation Alternatives"
-          className="h-5 w-auto md:h-6"
+          className="h-6 w-auto"
         />
       </a>
 

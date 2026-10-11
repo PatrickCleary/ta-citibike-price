@@ -213,7 +213,6 @@ export default function Narrator() {
   const story = useMapStore((s) => s.story);
   const resetMap = useResetMap();
   const [busy, setBusy] = useState(false);
-  const [hidden, setHidden] = useState(false);
   const setMapInteractive = useSetMapInteractive();
 
   const [prevPhase, setPrevPhase] = useState(phase);
@@ -272,10 +271,6 @@ export default function Narrator() {
     advance();
     setMapInteractive(true);
   };
-
-  useEffect(() => {
-    setHidden(false);
-  }, [phase]);
 
   // The step's own actions, between Back and Next. While busy (the selection
   // flyTo, or a draw-out playing) the ride clock takes their place instead —
@@ -357,43 +352,36 @@ export default function Narrator() {
 
   return (
     <div className="pointer-events-auto flex flex-col gap-1">
-      <AnimatePresence initial={false}>
-        {!hidden && (
-          <div className="flex flex-col w-full mt-2 md:mb-2">
-            <AnimatePresence initial={false} custom={direction} mode="wait">
-              <motion.div
-                key={phase} // Triggers animation when Zustand phase updates
-                custom={direction}
-                variants={slideVariants}
-                initial="enter"
-                animate="center"
-                exit="exit"
-                transition={{ type: "spring", stiffness: 300, damping: 30 }}
-                style={{
-                  width: "100%",
-                  height: "100%",
-                }}
-              >
-                {phase === "near" && <Legend steps={["near"]} />}
+      <div className="flex flex-col w-full mt-2 md:mb-2">
+        <AnimatePresence initial={false} custom={direction} mode="wait">
+          <motion.div
+            key={phase} // Triggers animation when Zustand phase updates
+            custom={direction}
+            variants={slideVariants}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={{ type: "spring", stiffness: 300, damping: 30 }}
+            style={{
+              width: "100%",
+              height: "100%",
+            }}
+          >
+            {phase === "near" && <Legend steps={["near"]} />}
 
-                {phase === "far" &&
-                  (exploring ? (
-                    <p>
-                      Tap any station on the map to see how far it gets you.
-                    </p>
-                  ) : (
-                    <Legend
-                      steps={(["near", "far"] as StepKey[]).filter(
-                        (k) => layers[k],
-                      )}
-                    />
-                  ))}
-
-              </motion.div>
-            </AnimatePresence>
-          </div>
-        )}
-      </AnimatePresence>
+            {phase === "far" &&
+              (exploring ? (
+                <p>Tap any station on the map to see how far it gets you.</p>
+              ) : (
+                <Legend
+                  steps={(["near", "far"] as StepKey[]).filter(
+                    (k) => layers[k],
+                  )}
+                />
+              ))}
+          </motion.div>
+        </AnimatePresence>
+      </div>
       {/* The bottom control bar. Portalled out because the card's backdrop-blur
           would otherwise become the containing block for `fixed` and pin it
           inside the card. */}
@@ -454,34 +442,6 @@ export default function Narrator() {
           </div>
         ),
         document.body,
-      )}
-      {!hidden && (
-        <button
-          className="w-full flex justify-center md:hidden text-gray-400"
-          onClick={() => setHidden(true)}
-        >
-          <svg width="2em" height="2em" viewBox="0 0 24 24">
-            <path d="M0 0h24v24H0z" fill="none" />
-            <path
-              fill="currentColor"
-              d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6l-6 6z"
-            />
-          </svg>
-        </button>
-      )}
-      {hidden && (
-        <button
-          className="w-full flex justify-center md:hidden text-gray-400"
-          onClick={() => setHidden(false)}
-        >
-          <svg width="2em" height="2em" viewBox="0 0 24 24">
-            <path d="M0 0h24v24H0z" fill="none" />
-            <path
-              fill="currentColor"
-              d="M7.41 8.58L12 13.17l4.59-4.59L18 10l-6 6l-6-6z"
-            />
-          </svg>
-        </button>
       )}
     </div>
   );
