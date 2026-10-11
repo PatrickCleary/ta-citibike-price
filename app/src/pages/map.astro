@@ -1,0 +1,18 @@
+---
+import "../styles/global.css";
+import BareMap from "../components/BareMap.tsx";
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Citi Bike Sheds — Map</title>
+  </head>
+  <body>
+    <main>
+      <BareMap client:only="react" />
+    </main>
+  </body>
+</html>

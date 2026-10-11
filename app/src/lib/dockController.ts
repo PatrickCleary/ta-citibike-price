@@ -419,18 +419,15 @@ export class DockController {
   // Lives here rather than in the caller so a dock's looks can't drift out of
   // sync — it's one thing wearing three, and they must all filter alike.
   //
-  // The pin is the odd one out: an isolated dock is exactly the case where the
-  // React bubble draws it (see StationBubble.tsx), and the two share an anchor,
-  // so the pin would sit behind the tail as a smudge. Filtering it to NO_DOCK
-  // rather than to `id` is what makes the bubble the origin's only look — and it
-  // means the story never pays for a symbol layer at all. The dot stays filtered
-  // to `id`: the draw-out frames outward past ZOOM_ICON, where the bubble is
-  // still the only marker but the dot is what carries the field's wave.
+  // An isolated dock is exactly the case where the React bubble draws it (see
+  // StationBubble.tsx), at every zoom. So both the dot and the pin are filtered
+  // to NO_DOCK rather than to `id`: the bubble is the origin's only look, and
+  // the story never pays for the symbol layer at all.
   isolate(id: string | null) {
     const filter: FilterSpecification | null = id
-      ? ["==", ["get", "station_id"], id]
+      ? ["==", ["get", "station_id"], NO_DOCK]
       : null;
-    this.setFilterIfChanged(DOCKS_LAYER, filter, id);
+    this.setFilterIfChanged(DOCKS_LAYER, filter, id ? NO_DOCK : null);
     this.setFilterIfChanged(
       DOCKS_ICON_LAYER,
       id ? ["==", ["get", "station_id"], NO_DOCK] : null,

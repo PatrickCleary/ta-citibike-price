@@ -28,11 +28,12 @@ import { useMapStore } from "../lib/mapStore";
 import { StoryController } from "../lib/storyController";
 import { WalkshedLayer } from "../lib/walksheds";
 import { toStation } from "../lib/handlers";
-import { FULL_VIEW } from "../lib/constants";
+import { BRAND_ORANGE, FULL_VIEW } from "../lib/constants";
 import Narrator from "./Narrator";
 import { SearchBar } from "./SearchBar";
 import { useIsMobile } from "../lib/useIsMobile";
-import { motion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
+import IntroOverlay from "./IntroOverlay";
 import type { FeatureCollection, Point } from "geojson";
 import {
   Layer,
@@ -80,6 +81,7 @@ function MapView({
 }) {
   const mapRef = useRef<MapRef>(null);
   const [intro, setIntro] = useState(false); // intro ripple already played?
+  const [splash, setSplash] = useState(true); // IntroOverlay open? (on first load, or via the corner dot)
   const markerRef = useRef<maplibregl.Marker>(null);
   const docksRef = useRef<DockController>(null);
   const tripsRef = useRef<TripLines>(null);
@@ -114,6 +116,7 @@ function MapView({
   // Discrete control state lives in the store; server data in react-query.
   const selected = useApp((s) => s.selected);
   const phase = useApp((s) => s.phase);
+  const layers = useApp((s) => s.layers);
 
   const reachQuery = useReach(selected?.id ?? null);
   const routesQuery = useRoutes(selected?.id ?? null);
@@ -242,14 +245,19 @@ function MapView({
         story.showOrigin();
         break;
       case "near":
+      case "reflect":
+      case "capped": // the near draw-out stays up until the far one plays
         story.holdNear();
         break;
       case "far":
+        story.holdFar(layers);
+        break;
+      case "compare":
       case "final":
         story.holdFar();
         break;
     }
-  }, [phase]);
+  }, [phase, layers]);
 
   // Routes for the pick arrived → hand them to the trip lines so they're ready
   // to draw when the UI triggers a step. A station with no routes file (data
@@ -333,21 +341,29 @@ function MapView({
       </div>
 
       <div className="fixed inset-0 pointer-events-none">
-        <div className="m-4 flex justify-center flex flex-col gap-3 md:w-md">
-          <motion.div
-            // 2. Animate the parent height to match the child's height
-            animate={{ height: height > 0 ? height + 24 : "auto" }}
-            transition={{ type: "spring", stiffness: 300, damping: 30 }}
-            style={{ overflow: "hidden" }} // Prevents text bleeding out during animation
-            className="rounded-xl bg-white/85 px-6 pt-4 pb-1 shadow-lg backdrop-blur"
-          >
-            <div ref={ref}>
-              <span className="block text-2xl font-semibold text-gray-900">
-                Where can a Citi Bike take you?
-              </span>
-              <Narrator />
-            </div>
-          </motion.div>
+        <div className="m-4 ml-16 flex justify-center flex flex-col gap-3 md:w-md">
+          {/* The intro is just the search bar — the pitch lives in IntroOverlay. */}
+          {phase !== "intro" && (
+            <motion.div
+              // 2. Animate the parent height to match the child's height
+              animate={{ height: height > 0 ? height + 24 : "auto" }}
+              transition={{ type: "spring", stiffness: 300, damping: 30 }}
+              style={{ overflow: "hidden" }} // Prevents text bleeding out during animation
+              className="rounded-xl bg-white/85 px-6 pt-4 pb-1 shadow-lg backdrop-blur"
+            >
+              <div ref={ref}>
+                {selected && (
+                  <span
+                    className="block text-2xl font-semibold"
+                    style={{ color: BRAND_ORANGE }}
+                  >
+                    {selected.name}
+                  </span>
+                )}
+                <Narrator />
+              </div>
+            </motion.div>
+          )}
           {phase === "intro" && (
             <SearchBar
               mapCenter={mapRef.current?.getCenter()}
@@ -360,6 +376,55 @@ function MapView({
           )}
         </div>
       </div>
+
+      {/* Always-on way back to the intro screen, menu-button sized. The card
+          column starts at ml-16 to clear it. */}
+      {!splash && (
+        <button
+          aria-label="About this map"
+          title="About this map"
+          className="fixed left-4 top-4 z-20 size-10 cursor-pointer rounded-full bg-white shadow-lg ring-2 ring-white transition-transform hover:scale-110"
+          onClick={() => setSplash(true)}
+        >
+          {/* TA mark: the arrow is a cut-out, so the white button shows through. */}
+          <img src="/ta-logo-mark.svg" alt="" className="size-full" />
+        </button>
+      )}
+
+      {/* Org mark, bottom-left (MapLibre's attribution owns bottom-right). */}
+      <a
+        href="https://www.transalt.org"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="fixed bottom-3 left-3 rounded-md bg-white/85 px-2 py-1.5 shadow-sm backdrop-blur"
+      >
+        <img
+          src="/ta_logo_RGB_REFRESH_transparent.webp"
+          alt="Transportation Alternatives"
+          className="h-5 w-auto md:h-6"
+        />
+      </a>
+
+      <AnimatePresence>
+        {splash && (
+          <IntroOverlay
+            onDismiss={() => setSplash(false)}
+            search={
+              <SearchBar
+                mapCenter={mapRef.current?.getCenter()}
+                onSelect={(result) => {
+                  handleSelect(result);
+                  setSplash(false);
+                }}
+                onClear={() => {
+                  markerRef.current?.remove();
+                  markerRef.current = null;
+                }}
+              />
+            }
+          />
+        )}
+      </AnimatePresence>
     </>
   );
 }

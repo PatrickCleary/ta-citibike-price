@@ -14,15 +14,33 @@ export interface Dock {
   name: string;
 }
 
-// The story is four discrete, independently re-enterable steps (plus `intro`,
+// The story is seven discrete, independently re-enterable steps (plus `intro`,
 // the pre-selection state). Each step owns a static resting frame; the two
 // draw-out steps (`near`, `far`) also have an animation the UI's play button
-// triggers. There is no scrubbing — you only ever play a step forward or land
+// triggers — from `selected` and `capped` respectively, the steps that pose the
+// question before each draw-out. There is no scrubbing — you only ever play a step forward or land
 // on its resting frame (e.g. via reset-to-any-step).
-export type Phase = "intro" | "selected" | "near" | "far" | "final";
+export type Phase =
+  | "intro"
+  | "selected"
+  | "near"
+  | "reflect"
+  | "capped"
+  | "far"
+  | "compare"
+  | "final";
 
 // The animated draw-out steps (the ones with a bike-speed tween).
 export type StepKey = "near" | "far";
+
+// Which tiers the far step's resting frame shows. The far draw-out itself is
+// always ≤45-only; the bottom toggle can then add the ≤11 tier back on top, or
+// show it alone. At least one is always on.
+export interface Layers {
+  near: boolean;
+  far: boolean;
+}
+export const FAR_ONLY: Layers = { near: false, far: true };
 
 // Constant-bike-speed playback: a draw-out step animates at this multiple of
 // real ride time (e.g. 140× → a 45-min route draws out in ~19s of wall clock).
@@ -33,7 +51,10 @@ export const PLAYBACK_SPEEDUP = 140;
 export const STEP_ORDER = [
   "selected",
   "near",
+  "reflect",
+  "capped",
   "far",
+  "compare",
   "final",
 ] as const satisfies readonly Phase[];
 
@@ -50,6 +71,9 @@ interface AppState {
   advance: () => void;
   /** Step back through STEP_ORDER; from the first step, return to the intro. */
   back: () => void;
+  /** Tiers shown on the far step (see Layers). */
+  layers: Layers;
+  setLayers: (l: Layers) => void;
 }
 
 // Transient pointer state, deliberately NOT part of AppState: hovering isn't a
@@ -68,7 +92,10 @@ export const useHover = create<HoverState>((set) => ({
 
 export const useApp = create<AppState>((set) => ({
   selected: null,
-  setSelected: (s) => set({ selected: s, phase: s ? STEP_ORDER[0] : "intro" }),
+  setSelected: (s) =>
+    set({ selected: s, phase: s ? STEP_ORDER[0] : "intro", layers: FAR_ONLY }),
+  layers: FAR_ONLY,
+  setLayers: (layers) => set({ layers }),
   phase: "intro",
   setPhase: (p) => set({ phase: p }),
   advance: () =>

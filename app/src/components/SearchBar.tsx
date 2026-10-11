@@ -100,7 +100,7 @@ export function SearchBar({ mapCenter, onSelect, onClear }: SearchBarProps) {
         onFocus={() =>
           !hasSelectedResult && suggestions.length > 0 && setOpen(true)
         }
-        placeholder="Search stations or places…"
+        placeholder="Search your address or favorite CitiBike dock..."
         className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-9
                     text-sm text-slate-800 placeholder:text-slate-400 shadow-sm
                     outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"

@@ -10,9 +10,9 @@
 
 import type maplibregl from "maplibre-gl";
 import { DockController } from "./dockController";
-import { TripLines, tiersForPhase } from "./tripLines";
+import { COLOR_ALL, TripLines, tiersForPhase } from "./tripLines";
 import type { WalkshedLayer } from "./walksheds";
-import { PLAYBACK_SPEEDUP, type StepKey } from "./store";
+import { FAR_ONLY, PLAYBACK_SPEEDUP, type Layers, type StepKey } from "./store";
 import { FULL_VIEW, ORIGIN_EASE_MS, ORIGIN_ZOOM } from "./constants";
 
 const EMPTY: Set<string> = new Set();
@@ -22,6 +22,9 @@ const linear = (t: number) => t; // constant speed — for bike-speed draw-out
 
 export class StoryController {
   private raf: number | null = null;
+  // The step whose draw-out `raf` is running, so landing on that same step's
+  // resting frame (the advance onDone triggers) lets its trails finish fading.
+  private playing: StepKey | null = null;
   private rewind: ReturnType<typeof setTimeout> | null = null;
   // Which dock styling is currently baked: a StepKey (that step's arrival
   // delays), or "bare" (origin only). Latched so the per-frame renderStep doesn't
@@ -61,15 +64,30 @@ export class StoryController {
   // the camera stays wherever it is (no auto-fit), so re-entering a step via the
   // reset-to-any-step controls doesn't lurch.
   holdNear() {
+    if (this.playing === "near") return;
     this.stop();
     if (!this.hasOrigin()) return this.showIntro();
     this.renderStep("near", 1);
   }
 
-  holdFar() {
+  // `layers` is the far step's tier toggle. The default (≤45 only) is exactly
+  // the draw-out's last frame, so it lets an in-flight draw-out finish fading;
+  // any other choice takes over immediately.
+  holdFar(layers: Layers = FAR_ONLY) {
+    const isDefault = !layers.near && layers.far;
+    if (this.playing === "far" && isDefault) return;
     this.stop();
     if (!this.hasOrigin()) return this.showIntro();
-    this.renderStep("far", 1);
+    if (isDefault) return this.renderStep("far", 1);
+
+    const id = this.selectedId()!;
+    this.isolateOrigin(id);
+    this.ensureDockStyling(id, "far", 1, false);
+    this.trips.setTiers(
+      { visible: layers.near, progress: 1, opacity: 1 }, // baked orange
+      { visible: layers.far, progress: 1, opacity: 1, color: COLOR_ALL },
+    );
+    this.sheds.showTiers(layers);
   }
 
   // ── Draw-out animations (triggered by the UI's play buttons) ────────────────
@@ -120,6 +138,7 @@ export class StoryController {
       cancelAnimationFrame(this.raf);
       this.raf = null;
     }
+    this.playing = null;
     if (this.rewind != null) {
       clearTimeout(this.rewind);
       this.rewind = null;
@@ -139,7 +158,9 @@ export class StoryController {
   // ── internals ───────────────────────────────────────────────────────────────
 
   // Tween `key`'s local progress 0→1 at constant bike speed (duration derived
-  // from the route distances), painting each frame, then hold at 1.
+  // from the route distances), painting each frame, then hold at 1. onDone fires
+  // as soon as every trip has docked; the clock runs on until the last trails
+  // have faded, so they don't freeze mid-fade.
   private play(key: StepKey, onDone?: () => void) {
     this.stop();
     if (!this.hasOrigin()) return;
@@ -149,26 +170,33 @@ export class StoryController {
     this.map.stop();
     this.trips.beginAutoFit();
 
-    const dur = (this.trips.rideSecondsFor(key) * 1000) / PLAYBACK_SPEEDUP;
+    const ride = this.trips.rideSecondsFor(key);
+    const dur = (ride * 1000) / PLAYBACK_SPEEDUP;
+    const doneAt = ride > 0 ? this.trips.doneSecondsFor(key) / ride : 1;
+    let done = false;
     const t0 = performance.now();
     const tick = (now: number) => {
       const k = dur <= 0 ? 1 : clamp01((now - t0) / dur);
       this.renderStep(key, linear(k));
+      if (!done && k >= doneAt) {
+        done = true;
+        onDone?.();
+      }
       if (k < 1) {
         this.raf = requestAnimationFrame(tick);
       } else {
         this.raf = null;
-        this.renderStep(key, 1);
+        this.playing = null;
         this.trips.endAutoFit();
-        onDone?.();
       }
     };
+    this.playing = key;
     this.raf = requestAnimationFrame(tick);
   }
 
   // Paint one frame of a step: isolate + style the origin, then set the tiers for
   // this step's progress (or hide them entirely for the pre-draw resting frame).
-  // A step's walkshed fades in only once its lines are fully drawn (t = 1).
+  // A step's walkshed fades in once every trip has docked (doneSecondsFor).
   private renderStep(
     key: StepKey,
     t: number,
@@ -184,7 +212,9 @@ export class StoryController {
     }
     const { near, all } = tiersForPhase(key, t);
     this.trips.setTiers(near, all);
-    this.sheds.show(t >= 1 ? key : null);
+    const ride = this.trips.rideSecondsFor(key);
+    const docked = t >= 1 || t * ride >= this.trips.doneSecondsFor(key);
+    this.sheds.show(docked ? key : null);
   }
 
   private hasOrigin(): boolean {
