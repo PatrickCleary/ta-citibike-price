@@ -25,8 +25,6 @@ export const COLOR_ALL: [number, number, number] = [99, 102, 241]; // 11–45 mi
 
 // Ride speed used to convert route distance into ride time.
 const SPEED_MPS = (11.2 * 1609.344) / 3600; // 11.2 mph ≈ 5.01 m/s
-// Maps wall-ms to ride-seconds for the dock plop curve (progress drives the rest).
-const PLAYBACK = 600;
 // Departure stagger: trips leave in order of straight-line distance from the
 // origin (nearest first), spread across this fraction of the tier's slowest
 // route duration. Produces a radial ripple; arrivals are not synced.
@@ -168,13 +166,22 @@ function decode(
   return { id, path, timestamps, color };
 }
 
+const lastArrival = (trips: Trip[]): number =>
+  trips.reduce((m, t) => Math.max(m, t.timestamps[t.timestamps.length - 1]), 1);
+
+// Dock plop length in ride-seconds (PLOP_MS is wall-clock).
+const PLOP_RIDE_S = (PLOP_MS / 1000) * PLAYBACK_SPEEDUP;
+
+// Ride-seconds by which the last trip has docked and finished its plop — the
+// moment a step reads as "done" (see doneSecondsFor).
+function doneTimeOf(trips: Trip[]): number {
+  return lastArrival(trips) + PLOP_RIDE_S;
+}
+
+// Ride-seconds at progress 1. Runs on past doneTimeOf until the last comet's
+// trail has fully faded, so a resting frame (t = 1) never freezes a tail.
 function endTimeOf(trips: Trip[]): number {
-  const maxTime = trips.reduce(
-    (m, t) => Math.max(m, t.timestamps[t.timestamps.length - 1]),
-    1,
-  );
-  // Reserve a tail so the last arrival's dock plop completes at progress 1.
-  return maxTime + (PLOP_MS / 1000) * PLAYBACK;
+  return lastArrival(trips) + Math.max(PLOP_RIDE_S, TRAIL_SECONDS);
 }
 
 // Push each trip's departure later in proportion to its straight-line distance
@@ -202,6 +209,8 @@ export class TripLines {
   private allTrips: Trip[] = [];
   private nearEnd = 1;
   private allEnd = 1;
+  private nearDone = 1;
+  private allDone = 1;
   private origin: [number, number] | null = null; // [lng, lat]
   private map: Map;
   // Accumulated geographic extent of the drawn trip points. Only ever unions in
@@ -228,10 +237,18 @@ export class TripLines {
     return this.origin;
   }
 
-  // Total ride-seconds for a phase's draw-out (departure stagger + travel +
-  // dock-plop tail). Drives constant-bike-speed playback in StoryController.
+  // Total ride-seconds for a phase's draw-out (departure stagger + travel, then
+  // until the last trail fades). Drives constant-bike-speed playback in
+  // StoryController.
   rideSecondsFor(phase: StepKey): number {
     return phase === "near" ? this.nearEnd : this.allEnd;
+  }
+
+  // Ride-seconds into the draw-out at which every trip has docked (plop
+  // included). Earlier than rideSecondsFor: the story moves on here while the
+  // last trails finish fading.
+  doneSecondsFor(phase: StepKey): number {
+    return phase === "near" ? this.nearDone : this.allDone;
   }
 
   private tripsFor(phase: StepKey): Trip[] {
@@ -268,6 +285,8 @@ export class TripLines {
     // staggerByDistance(this.allTrips, this.origin);
     this.nearEnd = endTimeOf(this.nearTrips);
     this.allEnd = endTimeOf(this.allTrips);
+    this.nearDone = doneTimeOf(this.nearTrips);
+    this.allDone = doneTimeOf(this.allTrips);
     this.pointBounds = null;
 
     this.setTiers(HIDDEN, HIDDEN);
@@ -328,7 +347,7 @@ export class TripLines {
           fill = [...WHITE, alpha];
           line = [...col, alpha];
         } else {
-          const plopMs = ((time - arrival) / PLAYBACK) * 1000;
+          const plopMs = ((time - arrival) / PLAYBACK_SPEEDUP) * 1000;
           radius = DOCK_R * overshoot(Math.min(plopMs / PLOP_MS, 1));
           pos = t.path[t.path.length - 1];
           includePoint(pos);
@@ -340,8 +359,10 @@ export class TripLines {
       }
     };
 
-    build(this.nearTrips, this.nearEnd, near);
+    // All first, near last: when both tiers show (the far step's toggle), the
+    // ≤11 docks sit on top of the ≤45 superset instead of being buried under it.
     build(this.allTrips, this.allEnd, all);
+    build(this.nearTrips, this.nearEnd, near);
 
     // Frame the accumulated point extent — but only while a draw-out tween owns
     // the camera (beginAutoFit)

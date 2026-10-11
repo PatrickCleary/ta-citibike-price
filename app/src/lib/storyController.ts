@@ -10,9 +10,9 @@
 
 import type maplibregl from "maplibre-gl";
 import { DockController } from "./dockController";
-import { TripLines, tiersForPhase } from "./tripLines";
+import { COLOR_ALL, TripLines, tiersForPhase } from "./tripLines";
 import type { WalkshedLayer } from "./walksheds";
-import { PLAYBACK_SPEEDUP, type StepKey } from "./store";
+import { FAR_ONLY, PLAYBACK_SPEEDUP, type Layers, type StepKey } from "./store";
 import { FULL_VIEW, ORIGIN_EASE_MS, ORIGIN_ZOOM } from "./constants";
 
 const EMPTY: Set<string> = new Set();
@@ -22,12 +22,22 @@ const linear = (t: number) => t; // constant speed — for bike-speed draw-out
 
 export class StoryController {
   private raf: number | null = null;
+  // The step whose draw-out is running (or rewinding to replay), so landing on
+  // that same step's resting frame (the advance onDone triggers) lets it finish.
+  private playing: StepKey | null = null;
+  // How far the running draw-out is towards every trip docking (0→1), for the
+  // UI's ride clock. Null when nothing is drawing.
+  private progress: { key: StepKey; frac: number } | null = null;
   private rewind: ReturnType<typeof setTimeout> | null = null;
   // Which dock styling is currently baked: a StepKey (that step's arrival
   // delays), or "bare" (origin only). Latched so the per-frame renderStep doesn't
   // re-bake 2.4k feature-states every tick — but keyed by step, not just by pick,
   // because each step bakes different delays.
-  private applied: StepKey | "bare" | null = null;
+  private applied: string | null = null;
+  // Far step, toggled on: the other docks are back on the map (dimmed,
+  // clickable) so a new origin can be picked from it. Every other entry point
+  // resets this via stop(); holdFar sets it.
+  private explore = false;
 
   constructor(
     private map: maplibregl.Map,
@@ -61,15 +71,35 @@ export class StoryController {
   // the camera stays wherever it is (no auto-fit), so re-entering a step via the
   // reset-to-any-step controls doesn't lurch.
   holdNear() {
+    if (this.playing === "near") return;
     this.stop();
     if (!this.hasOrigin()) return this.showIntro();
     this.renderStep("near", 1);
   }
 
-  holdFar() {
+  // `layers` is the far step's tier toggle. The default (≤45 only) is exactly
+  // the draw-out's last frame, so it lets an in-flight draw-out finish fading;
+  // any other choice takes over immediately.
+  //
+  // `explore` clears the trips and sheds and brings the other docks back
+  // (dimmed, clickable) for picking a new origin.
+  holdFar(layers: Layers = FAR_ONLY, explore = false) {
+    const isDefault = !layers.near && layers.far && !explore;
+    if (this.playing === "far" && isDefault) return;
     this.stop();
+    this.explore = explore;
     if (!this.hasOrigin()) return this.showIntro();
-    this.renderStep("far", 1);
+    if (isDefault) return this.renderStep("far", 1);
+
+    const id = this.selectedId()!;
+    const shown = explore ? { near: false, far: false } : layers;
+    this.isolateOrigin(id);
+    this.ensureDockStyling(id, "far", 1, false);
+    this.trips.setTiers(
+      { visible: shown.near, progress: 1, opacity: 1 }, // baked orange
+      { visible: shown.far, progress: 1, opacity: 1, color: COLOR_ALL },
+    );
+    this.sheds.showTiers(shown);
   }
 
   // ── Draw-out animations (triggered by the UI's play buttons) ────────────────
@@ -91,6 +121,11 @@ export class StoryController {
   // same as playNear/playFar.
   replay(key: StepKey, onDone?: () => void) {
     if (!this.rewindToOrigin(key)) return;
+    // Counts as playing from the start of the rewind, so a resting-frame repaint
+    // of this same step (e.g. far's replay resetting the layer toggle) doesn't
+    // stop() it and cancel the pending draw-out.
+    this.playing = key;
+    this.progress = { key, frac: 0 }; // clock reads 0:00 while the camera rewinds
     this.rewind = setTimeout(() => {
       this.rewind = null;
       this.play(key, onDone);
@@ -120,11 +155,20 @@ export class StoryController {
       cancelAnimationFrame(this.raf);
       this.raf = null;
     }
+    this.playing = null;
+    this.progress = null;
+    this.explore = false;
     if (this.rewind != null) {
       clearTimeout(this.rewind);
       this.rewind = null;
     }
     this.trips.endAutoFit();
+  }
+
+  // Draw-out progress for the ride clock: polled per frame by the UI rather than
+  // pushed, so only the clock re-renders.
+  rideProgress(): { key: StepKey; frac: number } | null {
+    return this.progress;
   }
 
   // Clear the latch so the next pick re-applies dock styling from scratch.
@@ -139,7 +183,9 @@ export class StoryController {
   // ── internals ───────────────────────────────────────────────────────────────
 
   // Tween `key`'s local progress 0→1 at constant bike speed (duration derived
-  // from the route distances), painting each frame, then hold at 1.
+  // from the route distances), painting each frame, then hold at 1. onDone fires
+  // as soon as every trip has docked; the clock runs on until the last trails
+  // have faded, so they don't freeze mid-fade.
   private play(key: StepKey, onDone?: () => void) {
     this.stop();
     if (!this.hasOrigin()) return;
@@ -149,26 +195,37 @@ export class StoryController {
     this.map.stop();
     this.trips.beginAutoFit();
 
-    const dur = (this.trips.rideSecondsFor(key) * 1000) / PLAYBACK_SPEEDUP;
+    const ride = this.trips.rideSecondsFor(key);
+    const dur = (ride * 1000) / PLAYBACK_SPEEDUP;
+    const doneAt = ride > 0 ? this.trips.doneSecondsFor(key) / ride : 1;
+    let done = false;
+    this.progress = { key, frac: 0 };
     const t0 = performance.now();
     const tick = (now: number) => {
       const k = dur <= 0 ? 1 : clamp01((now - t0) / dur);
       this.renderStep(key, linear(k));
+      if (!done && k >= doneAt) {
+        done = true;
+        this.progress = null;
+        onDone?.();
+      } else if (!done) {
+        this.progress = { key, frac: k / doneAt };
+      }
       if (k < 1) {
         this.raf = requestAnimationFrame(tick);
       } else {
         this.raf = null;
-        this.renderStep(key, 1);
+        this.playing = null;
         this.trips.endAutoFit();
-        onDone?.();
       }
     };
+    this.playing = key;
     this.raf = requestAnimationFrame(tick);
   }
 
   // Paint one frame of a step: isolate + style the origin, then set the tiers for
   // this step's progress (or hide them entirely for the pre-draw resting frame).
-  // A step's walkshed fades in only once its lines are fully drawn (t = 1).
+  // A step's walkshed fades in once every trip has docked (doneSecondsFor).
   private renderStep(
     key: StepKey,
     t: number,
@@ -184,7 +241,9 @@ export class StoryController {
     }
     const { near, all } = tiersForPhase(key, t);
     this.trips.setTiers(near, all);
-    this.sheds.show(t >= 1 ? key : null);
+    const ride = this.trips.rideSecondsFor(key);
+    const docked = t >= 1 || t * ride >= this.trips.doneSecondsFor(key);
+    this.sheds.show(docked ? key : null);
   }
 
   private hasOrigin(): boolean {
@@ -196,7 +255,7 @@ export class StoryController {
   // restore the full clickable field (the intro). DockController owns the
   // filtering itself now that a dock draws on two layers (dot + pin).
   private isolateOrigin(id: string | null) {
-    this.docks.isolate(id);
+    this.docks.isolate(id, this.explore);
   }
 
   // Bake the origin marker and this step's arrival delays into feature-state,
@@ -205,7 +264,7 @@ export class StoryController {
   // `bare` is the pre-draw frame (showOrigin / rewindToOrigin): origin only —
   // the lines haven't ridden out yet, so nothing has arrived.
   private ensureDockStyling(id: string, key: StepKey, t: number, bare: boolean) {
-    const tag = bare ? "bare" : key;
+    const tag = (bare ? "bare" : key) + (this.explore ? "+explore" : "");
     if (this.applied === tag) return;
     this.applied = tag;
 
@@ -215,8 +274,10 @@ export class StoryController {
       ring: EMPTY,
       showNear: true,
       showRing: true,
-      hideOthers: true,
-      delays: bare ? undefined : this.trips.arrivalDelays(key),
+      // Exploring dims the rest of the field back in (a distance ripple) rather
+      // than hiding it, so the other docks can be clicked.
+      hideOthers: !this.explore,
+      delays: bare || this.explore ? undefined : this.trips.arrivalDelays(key),
     });
 
     // A draw-out starting from the top (t≈0) plays the wave alongside the lines.

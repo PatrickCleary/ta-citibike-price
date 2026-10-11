@@ -26,13 +26,14 @@ import { useReach, useRoutes, useWalkshed } from "../lib/queries";
 import { useSelectStation } from "../lib/mapControl";
 import { useMapStore } from "../lib/mapStore";
 import { StoryController } from "../lib/storyController";
-import { WalkshedLayer } from "../lib/walksheds";
+import { WalkshedLayer, walkshedBounds } from "../lib/walksheds";
 import { toStation } from "../lib/handlers";
-import { FULL_VIEW } from "../lib/constants";
+import { BRAND_ORANGE, FULL_VIEW } from "../lib/constants";
 import Narrator from "./Narrator";
 import { SearchBar } from "./SearchBar";
 import { useIsMobile } from "../lib/useIsMobile";
-import { motion } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
+import IntroOverlay from "./IntroOverlay";
 import type { FeatureCollection, Point } from "geojson";
 import {
   Layer,
@@ -80,6 +81,7 @@ function MapView({
 }) {
   const mapRef = useRef<MapRef>(null);
   const [intro, setIntro] = useState(false); // intro ripple already played?
+  const [splash, setSplash] = useState(true); // IntroOverlay open? (on first load, or via the corner dot)
   const markerRef = useRef<maplibregl.Marker>(null);
   const docksRef = useRef<DockController>(null);
   const tripsRef = useRef<TripLines>(null);
@@ -114,6 +116,8 @@ function MapView({
   // Discrete control state lives in the store; server data in react-query.
   const selected = useApp((s) => s.selected);
   const phase = useApp((s) => s.phase);
+  const layers = useApp((s) => s.layers);
+  const exploring = useApp((s) => s.exploring);
 
   const reachQuery = useReach(selected?.id ?? null);
   const routesQuery = useRoutes(selected?.id ?? null);
@@ -167,13 +171,29 @@ function MapView({
 
   const handleClick = useCallback(
     (e: MapLayerMouseEvent) => {
+      // Bubbles are DOM markers inside the map container, so a click on one
+      // also lands here after the bubble has handled it — by which time exploring
+      // has already switched off, and this would restart the story. Only clicks
+      // on the canvas itself are the map's to handle.
+      if (e.originalEvent.target !== e.target.getCanvas()) return;
       const station = toStation(e.features?.[0]);
-      if (station) selectStation(station);
+      if (!station) return;
+      const { phase, exploring, switchStation } = useApp.getState();
+      // While exploring (far step, toggled on) a click swaps the origin in place
+      // — its finished far view, no restart. In the intro it starts the story.
+      // Mid-story the field is hidden, so there's nothing else to pick.
+      if (exploring) {
+        switchStation({ id: station.id, name: station.name });
+      } else if (phase === "intro") {
+        selectStation(station);
+      }
     },
     [selectStation],
   );
 
   const handleMouseMove = useCallback((e: MapLayerMouseEvent) => {
+    // Pointer over anything pickable (pins; dots too while exploring).
+    e.target.getCanvas().style.cursor = e.features?.length ? "pointer" : "";
     const id = e.features?.[0]?.properties?.station_id;
     useHover.getState().setHovered(typeof id === "string" ? id : null);
   }, []);
@@ -226,7 +246,9 @@ function MapView({
   useEffect(() => {
     storyRef.current?.resetPick();
     shedsRef.current?.setData(null);
-    if (!selected) tripsRef.current?.clear();
+    // Also on a far-step switch: drop the old origin's lines rather than leave
+    // them up while the new routes load.
+    tripsRef.current?.clear();
   }, [selected]);
 
   // Landing on a step paints its static resting frame. Draw-out animations are
@@ -242,14 +264,20 @@ function MapView({
         story.showOrigin();
         break;
       case "near":
+      case "reflect":
+      case "subsidy":
+      case "capped": // the near draw-out stays up until the far one plays
         story.holdNear();
         break;
       case "far":
+        story.holdFar(layers, exploring);
+        break;
+      case "compare":
       case "final":
         story.holdFar();
         break;
     }
-  }, [phase]);
+  }, [phase, layers, exploring]);
 
   // Routes for the pick arrived → hand them to the trip lines so they're ready
   // to draw when the UI triggers a step. A station with no routes file (data
@@ -259,12 +287,33 @@ function MapView({
     const routes = routesQuery.data;
     if (!routes) return;
     tripsRef.current?.show(routes);
+    // show() resets the tiers to hidden. Normally the next step paints them, but
+    // a far-step switch stays put — so repaint its resting frame now.
+    const { phase, layers, exploring } = useApp.getState();
+    if (phase === "far") storyRef.current?.holdFar(layers, exploring);
   }, [selected, routesQuery.isSuccess, routesQuery.data]);
 
   // Walkshed for the pick arrived → load it; the story decides when it shows.
   useEffect(() => {
     if (!selected || !walkshedQuery.isSuccess) return;
     shedsRef.current?.setData(walkshedQuery.data);
+
+    // A far-step switch (a fresh pick flies in via selectStation instead):
+    // frame the new origin's shown walksheds, padded clear of the top-left card
+    // and the bottom control bar.
+    const { phase, layers } = useApp.getState();
+    const data = walkshedQuery.data;
+    if (phase !== "far" || !data) return;
+    const tiers = [layers.near && 11, layers.far && 45].filter(Boolean) as (
+      | 11
+      | 45
+    )[];
+    const bounds = walkshedBounds(data, tiers);
+    if (!bounds) return;
+    mapRef.current?.fitBounds(bounds, {
+      padding: { top: 90, bottom: 120, left: 40, right: 40 },
+      duration: 1200,
+    });
   }, [selected, walkshedQuery.isSuccess, walkshedQuery.data]);
 
   const reach = reachQuery.data;
@@ -286,7 +335,11 @@ function MapView({
         <div className="h-full w-full">
           <MaplibreMap
             ref={mapRef}
-            interactiveLayerIds={[DOCKS_ICON_LAYER]}
+            // Exploring brings the dimmed dock field back as pickable; dots
+            // count there because the far camera usually sits below the pin gate.
+            interactiveLayerIds={
+              exploring ? [DOCKS_LAYER, DOCKS_ICON_LAYER] : [DOCKS_ICON_LAYER]
+            }
             mapStyle={STYLE_URL}
             initialViewState={{
               latitude: FULL_VIEW.center[1],
@@ -333,21 +386,29 @@ function MapView({
       </div>
 
       <div className="fixed inset-0 pointer-events-none">
-        <div className="m-4 flex justify-center flex flex-col gap-3 md:w-md">
-          <motion.div
-            // 2. Animate the parent height to match the child's height
-            animate={{ height: height > 0 ? height + 24 : "auto" }}
-            transition={{ type: "spring", stiffness: 300, damping: 30 }}
-            style={{ overflow: "hidden" }} // Prevents text bleeding out during animation
-            className="rounded-xl bg-white/85 px-6 pt-4 pb-1 shadow-lg backdrop-blur"
-          >
-            <div ref={ref}>
-              <span className="block text-2xl font-semibold text-gray-900">
-                Where can a Citi Bike take you?
-              </span>
-              <Narrator />
-            </div>
-          </motion.div>
+        <div className="m-4 ml-16 flex justify-center flex flex-col gap-3 md:w-md">
+          {/* The intro is just the search bar — the pitch lives in IntroOverlay. */}
+          {phase !== "intro" && (
+            <motion.div
+              // 2. Animate the parent height to match the child's height
+              animate={{ height: height > 0 ? height + 24 : "auto" }}
+              transition={{ type: "spring", stiffness: 300, damping: 30 }}
+              style={{ overflow: "hidden" }} // Prevents text bleeding out during animation
+              className="rounded-xl bg-white/85 px-6 pt-4 pb-1 shadow-lg backdrop-blur"
+            >
+              <div ref={ref}>
+                {selected && (
+                  <span
+                    className="block text-2xl font-semibold"
+                    style={{ color: BRAND_ORANGE }}
+                  >
+                    {selected.name}
+                  </span>
+                )}
+                <Narrator />
+              </div>
+            </motion.div>
+          )}
           {phase === "intro" && (
             <SearchBar
               mapCenter={mapRef.current?.getCenter()}
@@ -360,6 +421,58 @@ function MapView({
           )}
         </div>
       </div>
+
+      {/* Always-on way back to the intro screen, menu-button sized. The card
+          column starts at ml-16 to clear it. */}
+      {!splash && (
+        <button
+          aria-label="About this map"
+          title="About this map"
+          // 38px + a 2px ring = 42px, the search bar's height (py-2.5 + text-sm
+          // line + 1px borders); inset 2px so the ring's outer edge lines up
+          // with the bar's top at 16px.
+          className="fixed left-[18px] top-[18px] z-20 size-[38px] cursor-pointer rounded-full bg-white shadow-lg ring-2 ring-white transition-transform hover:scale-110"
+          onClick={() => setSplash(true)}
+        >
+          {/* TA mark: the arrow is a cut-out, so the white button shows through. */}
+          <img src="/ta-logo-mark.svg" alt="" className="size-full" />
+        </button>
+      )}
+
+      {/* Org mark, bottom-left (MapLibre's attribution owns bottom-right). */}
+      <a
+        href="https://www.transalt.org"
+        target="_blank"
+        rel="noopener noreferrer"
+        className="fixed bottom-3 left-3 hidden rounded-md bg-white/85 px-2 py-1.5 shadow-sm backdrop-blur md:block"
+      >
+        <img
+          src="/ta_logo_RGB_REFRESH_transparent.webp"
+          alt="Transportation Alternatives"
+          className="h-6 w-auto"
+        />
+      </a>
+
+      <AnimatePresence>
+        {splash && (
+          <IntroOverlay
+            onDismiss={() => setSplash(false)}
+            search={
+              <SearchBar
+                mapCenter={mapRef.current?.getCenter()}
+                onSelect={(result) => {
+                  handleSelect(result);
+                  setSplash(false);
+                }}
+                onClear={() => {
+                  markerRef.current?.remove();
+                  markerRef.current = null;
+                }}
+              />
+            }
+          />
+        )}
+      </AnimatePresence>
     </>
   );
 }

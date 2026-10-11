@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { searchAddresses, type Suggestion } from "../lib/geocodeSearch";
 import { useQuery } from "@tanstack/react-query";
 import { useDebounce } from "../lib/useDebounce";
+import { useIsMobile } from "../lib/useIsMobile";
 
 interface SearchBarProps {
   mapCenter?: maplibregl.LngLat;
@@ -17,6 +18,8 @@ export function SearchBar({ mapCenter, onSelect, onClear }: SearchBarProps) {
   const [hasSelectedResult, setHasSelectedResult] = useState(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
+  // A placeholder is an attribute, not something CSS breakpoints can swap.
+  const isMobile = useIsMobile();
 
   const debouncedInput = useDebounce(query, 100);
 
@@ -100,7 +103,11 @@ export function SearchBar({ mapCenter, onSelect, onClear }: SearchBarProps) {
         onFocus={() =>
           !hasSelectedResult && suggestions.length > 0 && setOpen(true)
         }
-        placeholder="Search stations or places…"
+        placeholder={
+          isMobile
+            ? "Search an address or station"
+            : "Search your address or favorite CitiBike dock..."
+        }
         className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-10 pr-9
                     text-sm text-slate-800 placeholder:text-slate-400 shadow-sm
                     outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/30"
