@@ -1,0 +1,8 @@
+{
+  "_comment": "Stations never listed as a reachable destination (reachable/, routes/, walkshed_unions/). Their own origin files are still built. Read by compute_shed_mapping.py and compute_walksheds.py.",
+  "stations": {
+    "b47e5ffd-4215-4476-a89b-ebe52111f763": "Roosevelt Island Tramway",
+    "88bf1344-354f-4699-bdbd-1c2584fc41ee": "Motorgate",
+    "ad17bd9a-735b-4a11-8ad3-dc7800e342af": "Southpoint Park"
+  }
+}

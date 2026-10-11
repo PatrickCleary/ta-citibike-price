@@ -15,3 +15,6 @@ public/stations.geojson
 
 # os
 .DS_Store
+
+# local walk shed unions (symlink to ../walkshed_unions, see compute_walksheds.py)
+public/walkshed_unions

@@ -8,7 +8,7 @@ within its 11-min and 45-min bicycle sheds. Writes one small file per station:
     reachable/<station_id>.json  ->  {"11": ["<id>", ...], "45": ["<id>", ...]}
 
 The "45" list is a superset of "11". The origin station is excluded from its
-own lists. These files are served per-station to the web app the same way the
+own lists, and stations in excluded_stations.json are excluded from every list. These files are served per-station to the web app the same way the
 shed polygons are (upload with upload_to_supabase.py, prefix "reachable").
 """
 import json
@@ -19,11 +19,15 @@ from shapely.strtree import STRtree
 
 OUTDIR = "output"
 REACHDIR = "reachable"
+EXCLUDED = "excluded_stations.json"
 
 
 def main():
     with open("stations.json") as f:
         stations = json.load(f)["data"]["stations"]
+
+    with open(EXCLUDED) as f:
+        excluded = set(json.load(f)["stations"])
 
     os.makedirs(REACHDIR, exist_ok=True)
 
@@ -58,6 +62,7 @@ def main():
                     if g.contains(points[idx]):
                         inside.add(ids[idx])
             inside.discard(sid)  # drop the origin station itself
+            inside -= excluded
             entry[str(t)] = sorted(inside)
 
         tmp = os.path.join(REACHDIR, f"{sid}.json.tmp")
