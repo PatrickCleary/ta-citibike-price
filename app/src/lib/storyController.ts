@@ -11,6 +11,7 @@
 import type maplibregl from "maplibre-gl";
 import { DockController } from "./dockController";
 import { TripLines, tiersForPhase } from "./tripLines";
+import type { WalkshedLayer } from "./walksheds";
 import { PLAYBACK_SPEEDUP, type StepKey } from "./store";
 import { FULL_VIEW, ORIGIN_EASE_MS, ORIGIN_ZOOM } from "./constants";
 
@@ -32,6 +33,7 @@ export class StoryController {
     private map: maplibregl.Map,
     private trips: TripLines,
     private docks: DockController,
+    private sheds: WalkshedLayer,
     private originFor: (id: string) => [number, number] | null,
     private selectedId: () => string | null,
   ) {}
@@ -43,6 +45,7 @@ export class StoryController {
     this.stop();
     this.isolateOrigin(null);
     this.trips.setTiers({ visible: false, progress: 0, opacity: 1 }, { visible: false, progress: 0, opacity: 1 });
+    this.sheds.show(null);
     this.map.jumpTo({ center: FULL_VIEW.center, zoom: FULL_VIEW.zoom });
   }
 
@@ -165,6 +168,7 @@ export class StoryController {
 
   // Paint one frame of a step: isolate + style the origin, then set the tiers for
   // this step's progress (or hide them entirely for the pre-draw resting frame).
+  // A step's walkshed fades in only once its lines are fully drawn (t = 1).
   private renderStep(
     key: StepKey,
     t: number,
@@ -175,10 +179,12 @@ export class StoryController {
     this.ensureDockStyling(id, key, t, !!opts?.hideTrips);
     if (opts?.hideTrips) {
       this.trips.setTiers({ visible: false, progress: 0, opacity: 1 }, { visible: false, progress: 0, opacity: 1 });
+      this.sheds.show(null);
       return;
     }
     const { near, all } = tiersForPhase(key, t);
     this.trips.setTiers(near, all);
+    this.sheds.show(t >= 1 ? key : null);
   }
 
   private hasOrigin(): boolean {
