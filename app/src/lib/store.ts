@@ -14,15 +14,34 @@ export interface Dock {
   name: string;
 }
 
-// The story is four discrete, independently re-enterable steps (plus `intro`,
+// The story is eight discrete, independently re-enterable steps (plus `intro`,
 // the pre-selection state). Each step owns a static resting frame; the two
 // draw-out steps (`near`, `far`) also have an animation the UI's play button
-// triggers. There is no scrubbing — you only ever play a step forward or land
+// triggers — from `selected` and `capped` respectively, the steps that pose the
+// question before each draw-out. There is no scrubbing — you only ever play a step forward or land
 // on its resting frame (e.g. via reset-to-any-step).
-export type Phase = "intro" | "selected" | "near" | "far" | "final";
+export type Phase =
+  | "intro"
+  | "selected"
+  | "near"
+  | "reflect"
+  | "subsidy"
+  | "capped"
+  | "far"
+  | "compare"
+  | "final";
 
 // The animated draw-out steps (the ones with a bike-speed tween).
 export type StepKey = "near" | "far";
+
+// Which tiers the far step's resting frame shows. The far draw-out itself is
+// always ≤45-only; the bottom toggle can then add the ≤11 tier back on top, or
+// show it alone. At least one is always on.
+export interface Layers {
+  near: boolean;
+  far: boolean;
+}
+export const FAR_ONLY: Layers = { near: false, far: true };
 
 // Constant-bike-speed playback: a draw-out step animates at this multiple of
 // real ride time (e.g. 140× → a 45-min route draws out in ~19s of wall clock).
@@ -33,7 +52,11 @@ export const PLAYBACK_SPEEDUP = 140;
 export const STEP_ORDER = [
   "selected",
   "near",
+  "reflect",
+  "subsidy",
+  "capped",
   "far",
+  "compare",
   "final",
 ] as const satisfies readonly Phase[];
 
@@ -50,6 +73,21 @@ interface AppState {
   advance: () => void;
   /** Step back through STEP_ORDER; from the first step, return to the intro. */
   back: () => void;
+  /** Swap the picked station in place, keeping the step (far-step exploring).
+   *  Ends exploring — one pick per toggle. */
+  switchStation: (s: Dock) => void;
+  /** Far step: the other docks are up for picking a new origin. Off by default;
+   *  any step change turns it off. */
+  exploring: boolean;
+  setExploring: (on: boolean) => void;
+  /** Draw-outs played through at least once for this pick. The step that
+   *  poses a draw-out (`selected`, `capped`) can't be skipped with Next until
+   *  its animation has been watched. */
+  watched: Record<StepKey, boolean>;
+  markWatched: (k: StepKey) => void;
+  /** Tiers shown on the far step (see Layers). */
+  layers: Layers;
+  setLayers: (l: Layers) => void;
 }
 
 // Transient pointer state, deliberately NOT part of AppState: hovering isn't a
@@ -68,21 +106,35 @@ export const useHover = create<HoverState>((set) => ({
 
 export const useApp = create<AppState>((set) => ({
   selected: null,
-  setSelected: (s) => set({ selected: s, phase: s ? STEP_ORDER[0] : "intro" }),
+  setSelected: (s) =>
+    set({
+      selected: s,
+      phase: s ? STEP_ORDER[0] : "intro",
+      layers: FAR_ONLY,
+      exploring: false,
+      watched: { near: false, far: false },
+    }),
+  watched: { near: false, far: false },
+  markWatched: (k) => set((s) => ({ watched: { ...s.watched, [k]: true } })),
+  switchStation: (s) => set({ selected: s, exploring: false }),
+  exploring: false,
+  setExploring: (exploring) => set({ exploring }),
+  layers: FAR_ONLY,
+  setLayers: (layers) => set({ layers }),
   phase: "intro",
-  setPhase: (p) => set({ phase: p }),
+  setPhase: (p) => set({ phase: p, exploring: false }),
   advance: () =>
     set((s) => {
       const i = (STEP_ORDER as readonly Phase[]).indexOf(s.phase);
       return i >= 0 && i < STEP_ORDER.length - 1
-        ? { phase: STEP_ORDER[i + 1] }
+        ? { phase: STEP_ORDER[i + 1], exploring: false }
         : {};
     }),
   back: () =>
     set((s) => {
       const i = (STEP_ORDER as readonly Phase[]).indexOf(s.phase);
       return i <= 0
-        ? { phase: "intro", selected: null }
-        : { phase: STEP_ORDER[i - 1] };
+        ? { phase: "intro", selected: null, exploring: false }
+        : { phase: STEP_ORDER[i - 1], exploring: false };
     }),
 }));

@@ -39,7 +39,7 @@ const rgb = ([r, g, b]: [number, number, number]) => `rgb(${r},${g},${b})`;
 // One fill + outline per step. Near is the ≤11 shed in the near lines' orange;
 // far is the ≤45 shed in the far lines' indigo (the far step recolours every
 // line blue, so its shed does too).
-const TIERS: Record<StepKey, { tier: 11 | 45; color: string; fill: number }> = {
+export const TIERS: Record<StepKey, { tier: 11 | 45; color: string; fill: number }> = {
   near: { tier: 11, color: rgb(COLOR_NEAR), fill: 0.22 },
   far: { tier: 45, color: rgb(COLOR_ALL), fill: 0.18 },
 };
@@ -49,7 +49,7 @@ const fillId = (key: StepKey) => `walkshed-${key}-fill`;
 const lineId = (key: StepKey) => `walkshed-${key}-line`;
 
 export class WalkshedLayer {
-  private shown: StepKey | null = null;
+  private shown = "";
 
   // Construct before TripLines: both slot under the dock layer, so adding these
   // first leaves the trip lines drawn on top of the shed.
@@ -100,13 +100,18 @@ export class WalkshedLayer {
   // Fade `key`'s shed in and the other out; null fades both out. Idempotent, so
   // it's safe to call every frame.
   show(key: StepKey | null) {
-    if (key === this.shown) return;
-    this.shown = key;
+    this.showTiers({ near: key === "near", far: key === "far" });
+  }
+
+  // Fade each tier's shed in or out independently (near draws over far).
+  showTiers(on: Record<StepKey, boolean>) {
+    const tag = `${on.near}/${on.far}`;
+    if (tag === this.shown) return;
+    this.shown = tag;
     for (const k of ["near", "far"] as StepKey[]) {
-      const on = k === key;
       if (this.map.getLayer(fillId(k))) {
-        this.map.setPaintProperty(fillId(k), "fill-opacity", on ? TIERS[k].fill : 0);
-        this.map.setPaintProperty(lineId(k), "line-opacity", on ? LINE_OPACITY : 0);
+        this.map.setPaintProperty(fillId(k), "fill-opacity", on[k] ? TIERS[k].fill : 0);
+        this.map.setPaintProperty(lineId(k), "line-opacity", on[k] ? LINE_OPACITY : 0);
       }
     }
   }
@@ -114,4 +119,25 @@ export class WalkshedLayer {
   private source() {
     return this.map.getSource(SOURCE) as GeoJSONSource | undefined;
   }
+}
+
+// [[w, s], [e, n]] around the given tiers' sheds, or null if none are present.
+export function walkshedBounds(
+  data: Walkshed,
+  tiers: (11 | 45)[],
+): [[number, number], [number, number]] | null {
+  let w = Infinity, s = Infinity, e = -Infinity, n = -Infinity;
+  const visit = (c: unknown): void => {
+    if (typeof (c as number[])[0] === "number") {
+      const [x, y] = c as [number, number];
+      if (x < w) w = x;
+      if (x > e) e = x;
+      if (y < s) s = y;
+      if (y > n) n = y;
+    } else (c as unknown[]).forEach(visit);
+  };
+  for (const f of data.features) {
+    if (tiers.includes(f.properties.tier)) visit(f.geometry.coordinates);
+  }
+  return w === Infinity ? null : [[w, s], [e, n]];
 }
