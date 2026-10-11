@@ -23,12 +23,6 @@ import { DOCKS_LAYER } from "./dockController";
 export const COLOR_NEAR: [number, number, number] = [245, 83, 43]; // ≤11 min — brand orange
 export const COLOR_ALL: [number, number, number] = [99, 102, 241]; // 11–45 min — indigo
 
-// The colour a step draws in: "near" keeps the ≤11 colour, "far" recolours the
-// whole ≤45 superset all-blue (see tiersForPhase). The region halo reads this so
-// it can't drift from the lines it's summarising.
-export const tierColor = (phase: StepKey): [number, number, number] =>
-  phase === "near" ? COLOR_NEAR : COLOR_ALL;
-
 // Ride speed used to convert route distance into ride time.
 const SPEED_MPS = (11.2 * 1609.344) / 3600; // 11.2 mph ≈ 5.01 m/s
 // Maps wall-ms to ride-seconds for the dock plop curve (progress drives the rest).
@@ -244,16 +238,11 @@ export class TripLines {
     return phase === "near" ? this.nearTrips : this.allTrips;
   }
 
-  // The destination docks this step rides out to.
-  destinations(phase: StepKey): Set<string> {
-    return new Set(this.tripsFor(phase).map((t) => t.id));
-  }
-
   // Per-destination arrival as wall-ms from the start of this step's draw-out —
   // the instant that dock's bead docks. Trip timestamps are ride-seconds and the
   // draw-out plays at PLAYBACK_SPEEDUP, so this is the same conversion play()
   // uses for its duration. Feeds DockController.Selection.delays, which is in
-  // wall-ms, so the dot plop and region halo land on the arriving line's frame.
+  // wall-ms, so the dot plop lands on the arriving line's frame.
   arrivalDelays(phase: StepKey): globalThis.Map<string, number> {
     const out = new globalThis.Map<string, number>();
     for (const t of this.tripsFor(phase)) {

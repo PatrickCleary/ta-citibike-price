@@ -10,7 +10,7 @@
 
 import type maplibregl from "maplibre-gl";
 import { DockController } from "./dockController";
-import { TripLines, tiersForPhase, tierColor } from "./tripLines";
+import { TripLines, tiersForPhase } from "./tripLines";
 import { PLAYBACK_SPEEDUP, type StepKey } from "./store";
 import { FULL_VIEW, ORIGIN_EASE_MS, ORIGIN_ZOOM } from "./constants";
 
@@ -22,10 +22,10 @@ const linear = (t: number) => t; // constant speed — for bike-speed draw-out
 export class StoryController {
   private raf: number | null = null;
   private rewind: ReturnType<typeof setTimeout> | null = null;
-  // Which dock styling is currently baked: a StepKey (that step's region), or
-  // "bare" (origin only, no region). Latched so the per-frame renderStep doesn't
+  // Which dock styling is currently baked: a StepKey (that step's arrival
+  // delays), or "bare" (origin only). Latched so the per-frame renderStep doesn't
   // re-bake 2.4k feature-states every tick — but keyed by step, not just by pick,
-  // because each step paints a different region.
+  // because each step bakes different delays.
   private applied: StepKey | "bare" | null = null;
 
   constructor(
@@ -193,11 +193,11 @@ export class StoryController {
     this.docks.isolate(id);
   }
 
-  // Bake the origin marker and this step's region into feature-state, once per
-  // step (latched by `applied`, cleared by resetPick).
+  // Bake the origin marker and this step's arrival delays into feature-state,
+  // once per step (latched by `applied`, cleared by resetPick).
   //
-  // `bare` is the pre-draw frame (showOrigin / rewindToOrigin): origin only, no
-  // region — the lines haven't ridden out yet, so nothing has arrived.
+  // `bare` is the pre-draw frame (showOrigin / rewindToOrigin): origin only —
+  // the lines haven't ridden out yet, so nothing has arrived.
   private ensureDockStyling(id: string, key: StepKey, t: number, bare: boolean) {
     const tag = bare ? "bare" : key;
     if (this.applied === tag) return;
@@ -210,17 +210,12 @@ export class StoryController {
       showNear: true,
       showRing: true,
       hideOthers: true,
-      // Each destination's halo blooms as its own line docks, so the region
-      // grows with the ride instead of appearing all at once. Same delays feed
-      // the dot wave, so the two can't drift apart.
-      halo: bare ? EMPTY : new Set([id, ...this.trips.destinations(key)]),
       delays: bare ? undefined : this.trips.arrivalDelays(key),
-      haloColor: tierColor(key),
     });
 
     // A draw-out starting from the top (t≈0) plays the wave alongside the lines.
     // A resting frame (holdNear/holdFar land at t=1) has no lines to sync to, so
-    // settle instantly — otherwise the region would bloom in over an already
+    // settle instantly — otherwise the wave would replay over an already
     // fully-drawn map.
     if (t >= 1) this.docks.refresh();
     else this.docks.start();
