@@ -5,8 +5,10 @@
 // (see compute_walksheds.py). The story fades a tier's shed in once that tier's
 // trip lines have finished drawing out, in the same colour as the lines.
 //
-// Fetched lazily per pick from PUBLIC_WALKSHED_BASE_URL, which defaults to
-// /walkshed_unions (a local symlink into the pipeline output, see app/.gitignore).
+// Fetched lazily per pick from PUBLIC_WALKSHED_BASE_URL, which defaults to the
+// public Supabase bucket (upload walkshed_unions/ there with upload_to_supabase.py,
+// prefix "walkshed_unions"). Override with /walkshed_unions to read the local
+// pipeline output through the public/ symlink (see app/.gitignore).
 
 import type { FilterSpecification, GeoJSONSource, Map } from "maplibre-gl";
 import type { FeatureCollection, MultiPolygon, Polygon } from "geojson";
@@ -14,8 +16,11 @@ import { DOCKS_LAYER } from "./dockController";
 import { COLOR_ALL, COLOR_NEAR } from "./tripLines";
 import type { StepKey } from "./store";
 
+const DEFAULT_WALKSHED_BASE_URL =
+  "https://kevndteqglsoslznrntz.supabase.co/storage/v1/object/public/ta-citibike-price/walkshed_unions";
+
 const WALKSHED_BASE_URL = (
-  import.meta.env.PUBLIC_WALKSHED_BASE_URL || "/walkshed_unions"
+  import.meta.env.PUBLIC_WALKSHED_BASE_URL || DEFAULT_WALKSHED_BASE_URL
 ).replace(/\/$/, "");
 
 export type Walkshed = FeatureCollection<
