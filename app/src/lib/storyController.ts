@@ -22,8 +22,8 @@ const linear = (t: number) => t; // constant speed — for bike-speed draw-out
 
 export class StoryController {
   private raf: number | null = null;
-  // The step whose draw-out `raf` is running, so landing on that same step's
-  // resting frame (the advance onDone triggers) lets its trails finish fading.
+  // The step whose draw-out is running (or rewinding to replay), so landing on
+  // that same step's resting frame (the advance onDone triggers) lets it finish.
   private playing: StepKey | null = null;
   private rewind: ReturnType<typeof setTimeout> | null = null;
   // Which dock styling is currently baked: a StepKey (that step's arrival
@@ -109,6 +109,10 @@ export class StoryController {
   // same as playNear/playFar.
   replay(key: StepKey, onDone?: () => void) {
     if (!this.rewindToOrigin(key)) return;
+    // Counts as playing from the start of the rewind, so a resting-frame repaint
+    // of this same step (e.g. far's replay resetting the layer toggle) doesn't
+    // stop() it and cancel the pending draw-out.
+    this.playing = key;
     this.rewind = setTimeout(() => {
       this.rewind = null;
       this.play(key, onDone);

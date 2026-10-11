@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { Play } from "lucide-react";
+import { ChevronLeft, ChevronRight, Play, RotateCcw } from "lucide-react";
 import { FAR_ONLY, useApp, type Layers, type StepKey } from "../lib/store";
 import { useMapStore, useSetMapInteractive } from "../lib/mapStore";
 import { useResetMap } from "../lib/mapControl";
@@ -10,13 +10,12 @@ import { COLOR_ALL, COLOR_NEAR } from "../lib/tripLines";
 import { TIERS } from "../lib/walksheds";
 import { AnimatePresence, motion } from "motion/react";
 
-const BTN =
-  "pointer-events-auto mt-2 inline-flex items-center px-4 py-2 cursor-pointer border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:cursor-default disabled:bg-gray-300 disabled:pointer-events-none";
-
-// Secondary action (Replay) — same shape, quieter, so the primary step button
-// stays the obvious next move.
-const BTN_ALT =
-  "pointer-events-auto mt-2 inline-flex items-center px-4 py-2 cursor-pointer border border-gray-300 text-sm font-medium rounded-md shadow-sm text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:cursor-default disabled:border-gray-200 disabled:text-gray-400 disabled:pointer-events-none";
+// Bottom-bar buttons. Round icon buttons for Back/Next (labelled on desktop),
+// a quieter pill for secondary actions (Replay, Pick another station).
+const NAV_BTN =
+  "pointer-events-auto inline-flex h-11 min-w-11 cursor-pointer items-center justify-center gap-1 rounded-full bg-white/90 px-3 text-sm font-medium text-gray-800 shadow-lg backdrop-blur hover:bg-white disabled:cursor-default disabled:text-gray-300";
+const ALT_BTN =
+  "pointer-events-auto inline-flex h-11 cursor-pointer items-center gap-2 rounded-full bg-white/90 px-4 text-sm font-medium text-gray-800 shadow-lg backdrop-blur hover:bg-white disabled:cursor-default disabled:text-gray-300";
 
 const STATE_RANKS = {
   intro: 0,
@@ -72,9 +71,9 @@ function Legend({ steps }: { steps: StepKey[] }) {
 
 // The far step's tier toggle: a segment per tier, each independently on/off,
 // but never both off.
-const TOGGLES: { step: StepKey; label: string }[] = [
-  { step: "near", label: "Today · 11 min" },
-  { step: "far", label: "Subsidized · 45 min" },
+const TOGGLES: { step: StepKey; label: string; short: string }[] = [
+  { step: "near", label: "Today · 11 min", short: "11 min" },
+  { step: "far", label: "Subsidized · 45 min", short: "45 min" },
 ];
 
 function LayerToggle({
@@ -86,7 +85,7 @@ function LayerToggle({
 }) {
   return (
     <div className="pointer-events-auto flex gap-1 rounded-full bg-white/90 p-1 shadow-lg backdrop-blur">
-      {TOGGLES.map(({ step, label }) => {
+      {TOGGLES.map(({ step, label, short }) => {
         const on = layers[step];
         const last = on && !layers[step === "near" ? "far" : "near"];
         const [r, g, b] = rgbOf(step);
@@ -96,7 +95,7 @@ function LayerToggle({
             aria-pressed={on}
             disabled={last}
             title={last ? "At least one layer stays on" : undefined}
-            className="flex cursor-pointer items-center gap-2 rounded-full px-4 py-2 text-sm font-medium transition-colors disabled:cursor-default"
+            className="flex cursor-pointer items-center gap-2 rounded-full px-3 py-2 text-sm font-medium whitespace-nowrap transition-colors disabled:cursor-default md:px-4"
             style={
               on
                 ? { background: `rgb(${r},${g},${b})`, color: "white" }
@@ -108,7 +107,8 @@ function LayerToggle({
               className="size-2.5 rounded-full"
               style={{ background: on ? "white" : `rgb(${r},${g},${b})` }}
             />
-            {label}
+            <span className="md:hidden">{short}</span>
+            <span className="hidden md:inline">{label}</span>
           </button>
         );
       })}
@@ -147,9 +147,11 @@ const slideVariants = {
   }),
 };
 
-// Floating caption + step controls. Each step shows a caption and an explicit
-// play/next button; the two draw-out steps (`near`, `far`) trigger the animation
-// and advance to the next step when it finishes. Not mounted in the intro
+// Two pieces: the narration card (top-left, rendered in place — text and
+// legends only) and the bottom control bar (portalled — every control). The bar
+// always has Back/Next, so any step can step to its neighbour; its middle holds
+// the step's own actions — the play buttons, Replay, and the far step's layer
+// toggle — which are separate from navigation. Not mounted in the intro
 // (Map.tsx shows just the search bar there).
 export default function Narrator() {
   const phase = useApp((s) => s.phase);
@@ -208,7 +210,7 @@ export default function Narrator() {
   };
 
   // Start the whole story over: back to the first step, rewinding the camera to
-  // the origin so "Show me" draws out from the zoomed-in view again.
+  // the origin so the near play button draws out from the zoomed-in view again.
   const restart = () => {
     if (!story?.rewindToOrigin()) return;
     setPhase("selected");
@@ -216,9 +218,81 @@ export default function Narrator() {
     setTimeout(() => setBusy(false), ORIGIN_EASE_MS);
   };
 
+  // Navigation. Back from the first step leaves the station entirely. Stepping
+  // (rather than playing) past a draw-out lands on its resting frame, so the map
+  // is handed back to the user just as a finished draw-out would.
+  const goBack = () => (phase === "selected" ? resetMap() : back());
+  const goNext = () => {
+    advance();
+    setMapInteractive(true);
+  };
+
   useEffect(() => {
     setHidden(false);
   }, [phase]);
+
+  // The step's own actions, between Back and Next. Hidden while busy (the
+  // selection flyTo, or a draw-out playing) — there's nothing to do then.
+  const actions = (() => {
+    switch (phase) {
+      case "selected":
+      case "capped": {
+        const prompt = PROMPTS[phase];
+        return (
+          <>
+            <button
+              className="pointer-events-auto inline-flex min-h-11 cursor-pointer items-center rounded-full bg-white/90 px-5 py-2 text-center text-sm leading-tight font-medium text-gray-900 shadow-lg backdrop-blur md:hidden"
+              onClick={() => play(prompt.step)}
+            >
+              {prompt.tap}
+            </button>
+            <button
+              className="pointer-events-auto hidden h-11 cursor-pointer items-center gap-2 rounded-full bg-blue-600 px-6 text-base font-semibold text-white shadow-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 md:inline-flex"
+              onClick={() => play(prompt.step)}
+            >
+              <Play size={18} fill="currentColor" />
+              {prompt.watch}
+            </button>
+          </>
+        );
+      }
+      case "near":
+        return (
+          <button className={ALT_BTN} onClick={() => replay("near")}>
+            <RotateCcw size={16} />
+            Replay
+          </button>
+        );
+      case "far":
+        return (
+          <>
+            <LayerToggle layers={layers} onChange={setLayers} />
+            <button
+              className={NAV_BTN}
+              aria-label="Replay"
+              title="Replay"
+              onClick={() => replay("far")}
+            >
+              <RotateCcw size={16} />
+            </button>
+          </>
+        );
+      case "final":
+        return (
+          <>
+            <button className={ALT_BTN} onClick={restart}>
+              <RotateCcw size={16} />
+              Replay
+            </button>
+            <button className={ALT_BTN} onClick={() => resetMap()}>
+              Pick another station
+            </button>
+          </>
+        );
+      default:
+        return null;
+    }
+  })();
 
   return (
     <div className="pointer-events-auto flex flex-col gap-1">
@@ -239,36 +313,7 @@ export default function Narrator() {
                   height: "100%",
                 }}
               >
-                {phase === "selected" && selected && (
-                  <button
-                    className="pointer-events-auto mb-2 cursor-pointer text-sm text-gray-500 underline underline-offset-2 hover:text-gray-900"
-                    onClick={() => resetMap()}
-                  >
-                    Select a different station
-                  </button>
-                )}
-
-                {phase === "near" && (
-                  <>
-                    <Legend steps={["near"]} />
-                    <div className="flex gap-2">
-                      <button
-                        className={BTN_ALT}
-                        disabled={busy}
-                        onClick={() => replay("near")}
-                      >
-                        Replay
-                      </button>
-                      <button
-                        className={BTN}
-                        disabled={busy}
-                        onClick={() => advance()}
-                      >
-                        Next
-                      </button>
-                    </div>
-                  </>
-                )}
+                {phase === "near" && <Legend steps={["near"]} />}
 
                 {phase === "reflect" && (
                   <>
@@ -280,19 +325,11 @@ export default function Narrator() {
                       That’s not very far at all — does that get you to work, to
                       your friends’ apartments?
                     </p>
-                    <div className="flex gap-2">
-                      <button className={BTN_ALT} onClick={() => back()}>
-                        Back
-                      </button>
-                      <button className={BTN} onClick={() => advance()}>
-                        Next
-                      </button>
-                    </div>
                   </>
                 )}
 
                 {phase === "capped" && (
-                  <p className="pb-2">
+                  <p>
                     Now, if New York subsidized Citi Bike — like it subsidizes
                     every bus, train, and ferry — three dollars could get you a
                     45-minute ride.
@@ -300,25 +337,11 @@ export default function Narrator() {
                 )}
 
                 {phase === "far" && (
-                  <>
-                    <Legend steps={(["near", "far"] as StepKey[]).filter((k) => layers[k])} />
-                    <div className="flex gap-2">
-                      <button
-                        className={BTN_ALT}
-                        disabled={busy}
-                        onClick={() => replay("far")}
-                      >
-                        Replay
-                      </button>
-                      <button
-                        className={BTN}
-                        disabled={busy}
-                        onClick={() => advance()}
-                      >
-                        Next
-                      </button>
-                    </div>
-                  </>
+                  <Legend
+                    steps={(["near", "far"] as StepKey[]).filter(
+                      (k) => layers[k],
+                    )}
+                  />
                 )}
 
                 {phase === "compare" && (
@@ -328,81 +351,64 @@ export default function Narrator() {
                       That's a huge difference in how far you can get for the
                       same price!
                     </p>
-                    <div className="flex gap-2">
-                      <button className={BTN_ALT} onClick={() => back()}>
-                        Back
-                      </button>
-                      <button className={BTN} onClick={() => advance()}>
-                        Amazing — let's make it happen
-                      </button>
-                    </div>
                   </>
                 )}
 
                 {phase === "final" && (
-                  <>
-                    <p>
-                      Placeholder for TA copy about the campaign and links to
-                      resources, etc.
-                    </p>
-                    <div className="flex gap-2">
-                      <button className={BTN} onClick={restart}>
-                        Replay
-                      </button>
-                      <button className={BTN} onClick={() => resetMap()}>
-                        Pick another station
-                      </button>
-                    </div>
-                  </>
+                  <p>
+                    Placeholder for TA copy about the campaign and links to
+                    resources, etc.
+                  </p>
                 )}
               </motion.div>
             </AnimatePresence>
           </div>
         )}
       </AnimatePresence>
-      {/* The selected step's call to action sits low and centred over the map. It's
-          portalled out because the card's backdrop-blur would otherwise become
-          the containing block for `fixed` and pin it inside the card. Waits out
-          the selection flyTo (busy) so it can't start a draw-out mid-flight. */}
+      {/* The bottom control bar. Portalled out because the card's backdrop-blur
+          would otherwise become the containing block for `fixed` and pin it
+          inside the card. */}
       {createPortal(
-        <AnimatePresence>
-          {(phase === "selected" || phase === "capped") && selected && !busy && (
-            <motion.div
-              key={`play-prompt-${phase}`}
-              className="pointer-events-none fixed inset-x-0 bottom-0 flex justify-center p-4 pb-12"
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              transition={{ duration: 0.2 }}
+        selected && (
+          <div className="pointer-events-none fixed inset-x-0 bottom-0 flex items-center justify-center gap-2 p-4 pb-10">
+            <button
+              className={NAV_BTN}
+              aria-label="Back"
+              disabled={busy}
+              onClick={goBack}
             >
+              <ChevronLeft size={20} />
+              <span className="hidden pr-1 md:inline">Back</span>
+            </button>
+
+            <AnimatePresence mode="wait">
+              {!busy && actions && (
+                <motion.div
+                  key={phase}
+                  className="flex min-w-0 shrink items-center gap-2"
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  transition={{ duration: 0.2 }}
+                >
+                  {actions}
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {phase !== "final" && (
               <button
-                className="pointer-events-auto cursor-pointer rounded-full bg-white/90 px-5 py-3 text-base font-medium text-gray-900 shadow-lg backdrop-blur md:hidden"
-                onClick={() => play(PROMPTS[phase].step)}
+                className={NAV_BTN}
+                aria-label="Next"
+                disabled={busy}
+                onClick={goNext}
               >
-                {PROMPTS[phase].tap}
+                <span className="hidden pl-1 md:inline">Next</span>
+                <ChevronRight size={20} />
               </button>
-              <button
-                className="pointer-events-auto hidden cursor-pointer items-center gap-2 rounded-full bg-blue-600 px-6 py-3 text-base font-semibold text-white shadow-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 md:inline-flex"
-                onClick={() => play(PROMPTS[phase].step)}
-              >
-                <Play size={18} fill="currentColor" />
-                {PROMPTS[phase].watch}
-              </button>
-            </motion.div>
-          )}
-          {phase === "far" && selected && !busy && (
-            <motion.div
-              key="layer-toggle"
-              className="pointer-events-none fixed inset-x-0 bottom-0 flex justify-center p-4 pb-12"
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              transition={{ duration: 0.2 }}
-            >
-              <LayerToggle layers={layers} onChange={setLayers} />
-            </motion.div>
-          )}
-        </AnimatePresence>,
+            )}
+          </div>
+        ),
         document.body,
       )}
       {!hidden && (
