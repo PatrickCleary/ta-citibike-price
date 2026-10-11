@@ -22,10 +22,11 @@ import {
 import StationBubbles from "./StationBubble";
 import { TripLines } from "../lib/tripLines";
 import { useApp, useHover } from "../lib/store";
-import { useReach, useRoutes } from "../lib/queries";
+import { useReach, useRoutes, useWalkshed } from "../lib/queries";
 import { useSelectStation } from "../lib/mapControl";
 import { useMapStore } from "../lib/mapStore";
 import { StoryController } from "../lib/storyController";
+import { WalkshedLayer } from "../lib/walksheds";
 import { toStation } from "../lib/handlers";
 import { FULL_VIEW } from "../lib/constants";
 import Narrator from "./Narrator";
@@ -82,6 +83,7 @@ function MapView({
   const markerRef = useRef<maplibregl.Marker>(null);
   const docksRef = useRef<DockController>(null);
   const tripsRef = useRef<TripLines>(null);
+  const shedsRef = useRef<WalkshedLayer>(null);
   const storyRef = useRef<StoryController>(null);
 
   const features = useMemo(
@@ -115,6 +117,7 @@ function MapView({
 
   const reachQuery = useReach(selected?.id ?? null);
   const routesQuery = useRoutes(selected?.id ?? null);
+  const walkshedQuery = useWalkshed(selected?.id ?? null);
 
   const isMobile = useIsMobile();
 
@@ -136,11 +139,14 @@ function MapView({
 
     // set up controllers
     docksRef.current = new DockController(map);
+    // Sheds before trips, so the trip lines stack on top (both sit under docks).
+    shedsRef.current = new WalkshedLayer(map);
     tripsRef.current = new TripLines(map);
     storyRef.current = new StoryController(
       map,
       tripsRef.current,
       docksRef.current,
+      shedsRef.current,
       (id) => coords.get(id) ?? null,
       () => useApp.getState().selected?.id ?? null,
     );
@@ -219,6 +225,7 @@ function MapView({
   // origin styling from a clean slate; clear the trip lines on deselect.
   useEffect(() => {
     storyRef.current?.resetPick();
+    shedsRef.current?.setData(null);
     if (!selected) tripsRef.current?.clear();
   }, [selected]);
 
@@ -253,6 +260,12 @@ function MapView({
     if (!routes) return;
     tripsRef.current?.show(routes);
   }, [selected, routesQuery.isSuccess, routesQuery.data]);
+
+  // Walkshed for the pick arrived → load it; the story decides when it shows.
+  useEffect(() => {
+    if (!selected || !walkshedQuery.isSuccess) return;
+    shedsRef.current?.setData(walkshedQuery.data);
+  }, [selected, walkshedQuery.isSuccess, walkshedQuery.data]);
 
   const reach = reachQuery.data;
   const counts: Record<number, number> | null = reach
