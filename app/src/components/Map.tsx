@@ -26,7 +26,7 @@ import Landmarks from "./Landmarks";
 import { TripLines } from "../lib/tripLines";
 import { useApp, useHover } from "../lib/store";
 import { useReach, useRoutes, useWalkshed } from "../lib/queries";
-import { useSelectStation } from "../lib/mapControl";
+import { useResetMap, useSelectStation } from "../lib/mapControl";
 import { useMapStore } from "../lib/mapStore";
 import { StoryController } from "../lib/storyController";
 import { WalkshedLayer, walkshedBounds } from "../lib/walksheds";
@@ -43,6 +43,7 @@ import Narrator, { StepLegend } from "./Narrator";
 import { SearchBar } from "./SearchBar";
 import { useIsMobile } from "../lib/useIsMobile";
 import { AnimatePresence, motion } from "motion/react";
+import { X } from "lucide-react";
 import IntroOverlay from "./IntroOverlay";
 import type { FeatureCollection, Point } from "geojson";
 import {
@@ -121,6 +122,7 @@ function MapView({
   // DOM, so it needs the list (names included) rather than a map source.
   const [stations, setStations] = useState<StationPoint[]>([]);
   const selectStation = useSelectStation();
+  const resetMap = useResetMap();
   const { setMap, setDocks, setStory } = useMapStore();
 
   // Discrete control state lives in the store; server data in react-query.
@@ -452,12 +454,24 @@ function MapView({
               >
                 <div ref={ref} className="flex flex-col gap-1.5">
                   {selected && (
-                    <h2
-                      className="text-xs font-bold leading-tight"
-                      style={{ color: BRAND_ORANGE }}
-                    >
-                      {selected.name}
-                    </h2>
+                    <div className="flex items-center justify-between gap-3">
+                      <h2
+                        className="text-xs font-bold leading-tight"
+                        style={{ color: BRAND_ORANGE }}
+                      >
+                        {selected.name}
+                      </h2>
+                      {/* Clear: drop the pick and go back to the start. */}
+                      <button
+                        type="button"
+                        aria-label="Clear station and start over"
+                        title="Clear station"
+                        className="-mr-1 flex size-5 cursor-pointer items-center justify-center rounded-full text-gray-400 hover:bg-gray-200/70 hover:text-gray-700"
+                        onClick={resetMap}
+                      >
+                        <X className="size-3.5" strokeWidth={2.5} />
+                      </button>
+                    </div>
                   )}
                   <StepLegend />
                 </div>
