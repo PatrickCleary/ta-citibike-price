@@ -2,9 +2,9 @@
 // (data/landmarks.ts), so someone watching the trip lines ride out can tell
 // Midtown from Astoria without street labels (the basemap has none).
 //
-// They're up in every phase, the intro included, so the city-wide view reads as
-// a city while a dock is being picked. Collision culling keeps that frame to the
-// labels that fit.
+// They're up throughout the story, but not while a dock is being picked — the
+// intro's city-wide field, and the far step's "another station" explore mode —
+// where the docks are the point and labels over them would only get in the way.
 //
 // Labels are collision-culled per frame (see BY_PRIORITY), so the wide far-step
 // frame shows as many as fit, iconic ones first, and the rest arrive as the
@@ -20,6 +20,7 @@ import { createPortal } from "react-dom";
 import maplibregl from "maplibre-gl";
 import { LANDMARKS, type Landmark } from "../data/landmarks";
 import { useMapStore } from "../lib/mapStore";
+import { useApp } from "../lib/store";
 
 // Tier never hides a landmark on its own — every one shows wherever there is
 // room. Tier only decides who wins when two labels would overlap: tier 1 first.
@@ -62,7 +63,9 @@ const APPEAR_MS = 350;
 
 export default function Landmarks() {
   const map = useMapStore((s) => s.map);
-  const placed = useVisibleLandmarks(map);
+  // Picking a dock: the intro, or exploring on the far step.
+  const picking = useApp((s) => s.phase === "intro" || s.exploring);
+  const placed = useVisibleLandmarks(picking ? null : map);
 
   const byId = useMemo(
     () => new globalThis.Map(LANDMARKS.map((l) => [l.id, l])),
@@ -95,7 +98,7 @@ const overlaps = (a: Box, b: Box) =>
   a[0] < b[2] && a[2] > b[0] && a[1] < b[3] && a[3] > b[1];
 
 // The landmarks inside the viewport that win their screen space, and how much
-// of each (full label or icon only).
+// of each (full label or icon only). A null map parks the layer (nothing shown).
 function useVisibleLandmarks(map: maplibregl.Map | null): Placed[] {
   const [placed, setPlaced] = useState<Placed[]>([]);
   const keyRef = useRef("");
