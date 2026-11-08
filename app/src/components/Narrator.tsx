@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { StoryController } from "../lib/storyController";
 import { createPortal } from "react-dom";
 import {
+  Check,
   ChevronLeft,
   ChevronRight,
   Play,
@@ -21,12 +22,23 @@ import { COLOR_ALL, COLOR_NEAR } from "../lib/tripLines";
 import { TIERS } from "../lib/walksheds";
 import { AnimatePresence, motion } from "motion/react";
 
-// Bottom-bar buttons. Round icon buttons for Back/Next (labelled on desktop),
-// a quieter pill for secondary actions (Replay, Pick another station).
-const NAV_BTN =
-  "pointer-events-auto inline-flex h-11 min-w-11 cursor-pointer items-center justify-center gap-1 rounded-full bg-white/90 px-3 text-sm font-medium text-gray-800 shadow-lg backdrop-blur hover:bg-white disabled:cursor-default disabled:text-gray-300";
-const ALT_BTN =
-  "pointer-events-auto inline-flex h-11 cursor-pointer items-center gap-2 rounded-full bg-white/90 px-4 text-sm font-medium text-gray-800 shadow-lg backdrop-blur hover:bg-white disabled:cursor-default disabled:text-gray-300";
+// Bottom-bar buttons. Every one presses in and pops back (PRESS). Round
+// icon buttons for Back/Next (labelled on desktop); a quieter pill for
+// secondary actions (Replay, Pick another station) that stretches to fill the
+// bar's middle; and the blue primary for whatever the step suggests you do
+// next — the play button on the two steps that pose a draw-out, Next
+// everywhere else.
+const PRESS =
+  "transition-[transform,background-color,color] duration-150 ease-out hover:scale-[1.03] active:scale-95 disabled:hover:scale-100 disabled:active:scale-100";
+// NAV_BTN and NAV_PRIMARY share one footprint (padding, weight) and differ
+// only in colour, so Next can switch between them — grey while a draw-out
+// plays, blue once the step lands — without changing width and shoving the
+// middle of the bar around.
+const NAV_BASE = `${PRESS} pointer-events-auto inline-flex h-11 min-w-11 shrink-0 cursor-pointer items-center justify-center gap-1 rounded-full px-3 text-sm font-medium shadow-lg disabled:cursor-default`;
+const NAV_BTN = `${NAV_BASE} bg-white/90 text-gray-800 backdrop-blur hover:bg-white disabled:text-gray-300`;
+const NAV_PRIMARY = `${NAV_BASE} bg-blue-600 text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2`;
+const ALT_BTN = `${PRESS} pointer-events-auto inline-flex h-11 min-w-0 flex-1 cursor-pointer items-center justify-center gap-2 rounded-full bg-white/90 px-4 text-sm font-medium text-gray-800 shadow-lg backdrop-blur hover:bg-white disabled:cursor-default disabled:text-gray-300`;
+const PRIMARY_BTN = `${PRESS} pointer-events-auto inline-flex h-11 shrink-0 cursor-pointer items-center justify-center gap-2 rounded-full bg-blue-600 px-5 text-sm font-semibold text-white shadow-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:cursor-default`;
 
 // Map key for a draw-out step: how many docks the tier reaches, in the colour
 // its trip dots and walkshed fill are painted (orange for near; the far step
@@ -47,40 +59,89 @@ const TIER_KEY: Record<StepKey, "11" | "45"> = { near: "11", far: "45" };
 
 const rgbOf = (step: StepKey) => (step === "near" ? COLOR_NEAR : COLOR_ALL);
 
-function Legend({ steps }: { steps: StepKey[] }) {
+// One row per tier. On the far step the rows ARE the tier toggle: `layers` +
+// `onToggle` make each row a button with a check indicator, dimmed while off,
+// and the last row left on can't be switched off. Without them (the near
+// step) the rows are static, with the same indicator always checked so the
+// two steps read alike.
+function Legend({
+  steps,
+  layers,
+  onToggle,
+}: {
+  steps: StepKey[];
+  layers?: Layers;
+  onToggle?: (step: StepKey) => void;
+}) {
   const selected = useApp((s) => s.selected);
   // Same query Map.tsx fires on pick, so this is a cache hit by the time the
   // near step shows. The 45 set is a superset of 11, so each is a plain count.
   const routes = useRoutes(selected?.id ?? null).data;
+  const isOn = (step: StepKey) => (layers ? layers[step] : true);
+  const shown = steps.filter(isOn);
   return (
     <div className="flex flex-col gap-1.5">
-      <ul className="flex flex-col gap-0.5 text-sm text-gray-800">
+      <ul className="-mx-1.5 flex flex-col text-xs text-gray-800 md:text-sm">
         {steps.map((step) => {
           const [r, g, b] = rgbOf(step);
+          const rgb = `rgb(${r},${g},${b})`;
+          const on = isOn(step);
+          const last = on && shown.length === 1;
           const count = routes
             ? Object.keys(routes[TIER_KEY[step]]).length
             : null;
-          return (
-            <li key={step} className="flex items-baseline gap-1.5">
+          const row = (
+            <>
               <span
-                className="text-xl font-semibold tabular-nums"
-                style={{ color: `rgb(${r},${g},${b})` }}
+                aria-hidden
+                className={`flex size-4 shrink-0 items-center justify-center rounded-full border-2 transition-colors ${
+                  on ? "text-white" : "border-gray-300 bg-transparent"
+                }`}
+                style={on ? { background: rgb, borderColor: rgb } : undefined}
+              >
+                {on && <Check size={11} strokeWidth={3} />}
+              </span>
+              <span
+                className={`text-lg font-semibold tabular-nums transition-colors md:text-xl ${
+                  on ? "" : "text-gray-400"
+                }`}
+                style={on ? { color: rgb } : undefined}
               >
                 {count == null ? "—" : count.toLocaleString()}
               </span>
-              <span>
+              <span className={on ? "" : "text-gray-400"}>
                 <span className="md:hidden">{LEGEND_LABELS[step].short}</span>
                 <span className="hidden md:inline">
                   {LEGEND_LABELS[step].full}
                 </span>
               </span>
+            </>
+          );
+          return (
+            <li key={step}>
+              {onToggle ? (
+                <button
+                  type="button"
+                  aria-pressed={on}
+                  disabled={last}
+                  title={last ? "At least one layer stays on" : undefined}
+                  className="flex w-full cursor-pointer items-center gap-1.5 rounded-lg px-1.5 py-0.5 text-left whitespace-nowrap transition-colors hover:bg-black/5 disabled:cursor-default disabled:hover:bg-transparent md:gap-2"
+                  onClick={() => onToggle(step)}
+                >
+                  {row}
+                </button>
+              ) : (
+                <span className="flex items-center gap-1.5 px-1.5 py-0.5 whitespace-nowrap md:gap-2">
+                  {row}
+                </span>
+              )}
             </li>
           );
         })}
       </ul>
       <p className="flex items-center gap-1.5 text-xs text-gray-500">
         <span className="flex shrink-0 gap-1">
-          {steps.map((step) => {
+          {shown.map((step) => {
             const [r, g, b] = rgbOf(step);
             return (
               <span
@@ -105,6 +166,7 @@ function Legend({ steps }: { steps: StepKey[] }) {
 export function StepLegend() {
   const phase = useApp((s) => s.phase);
   const layers = useApp((s) => s.layers);
+  const setLayers = useApp((s) => s.setLayers);
   const exploring = useApp((s) => s.exploring);
   if (phase === "near") return <Legend steps={["near"]} />;
   if (phase === "far") {
@@ -117,58 +179,13 @@ export function StepLegend() {
     }
     return (
       <Legend
-        steps={(["near", "far"] as StepKey[]).filter((k) => layers[k])}
+        steps={["near", "far"]}
+        layers={layers}
+        onToggle={(k) => setLayers({ ...layers, [k]: !layers[k] })}
       />
     );
   }
   return null;
-}
-
-// The far step's tier toggle: a segment per tier, each independently on/off,
-// but never both off.
-const TOGGLES: { step: StepKey; label: string; short: string }[] = [
-  { step: "near", label: "Today · 11 min", short: "11 min" },
-  { step: "far", label: "Subsidized · 45 min", short: "45 min" },
-];
-
-function LayerToggle({
-  layers,
-  onChange,
-}: {
-  layers: Layers;
-  onChange: (l: Layers) => void;
-}) {
-  return (
-    <div className="pointer-events-auto flex gap-1 rounded-full bg-white/90 p-1 shadow-lg backdrop-blur">
-      {TOGGLES.map(({ step, label, short }) => {
-        const on = layers[step];
-        const last = on && !layers[step === "near" ? "far" : "near"];
-        const [r, g, b] = rgbOf(step);
-        return (
-          <button
-            key={step}
-            aria-pressed={on}
-            disabled={last}
-            title={last ? "At least one layer stays on" : undefined}
-            className="flex cursor-pointer items-center gap-2 rounded-full px-3 py-2 text-sm font-medium whitespace-nowrap transition-colors disabled:cursor-default md:px-4"
-            style={
-              on
-                ? { background: `rgb(${r},${g},${b})`, color: "white" }
-                : { color: "#374151" }
-            }
-            onClick={() => onChange({ ...layers, [step]: !on })}
-          >
-            <span
-              className="size-2.5 rounded-full"
-              style={{ background: on ? "white" : `rgb(${r},${g},${b})` }}
-            />
-            <span className="md:hidden">{short}</span>
-            <span className="hidden md:inline">{label}</span>
-          </button>
-        );
-      })}
-    </div>
-  );
 }
 
 // Ride clock shown while trips draw out: counts 0:00 → the tier's budget,
@@ -193,7 +210,7 @@ function RideClock({ story }: { story: StoryController }) {
   const mmss = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
   const [r, g, b] = rgbOf(p.key);
   return (
-    <div className="pointer-events-auto inline-flex h-11 items-center gap-2 rounded-full bg-white/90 px-4 shadow-lg backdrop-blur">
+    <div className="pointer-events-auto inline-flex h-11 min-w-0 flex-1 items-center justify-center gap-2 rounded-full bg-white/90 px-4 shadow-lg backdrop-blur">
       <Timer size={18} style={{ color: `rgb(${r},${g},${b})` }} />
       <span className="w-14 text-right text-lg font-semibold tabular-nums text-gray-900">
         {mmss}
@@ -205,21 +222,13 @@ function RideClock({ story }: { story: StoryController }) {
   );
 }
 
-// The mid-story call to action for each step that poses a draw-out.
+// The play button's label on each step that poses a draw-out. Short noun
+// phrases: the play icon already says "watch", and the step's story copy has
+// just posed the question.
 const PROMPTS = {
-  selected: {
-    step: "near",
-    tap: "Tap to see how far $3.00 gets you today",
-    watch: "Watch how far $3.00 gets you today",
-  },
-  capped: {
-    step: "far",
-    tap: "Tap to see how far $3.00 could get you",
-    watch: "Watch how far $3.00 could get you",
-  },
-} as const satisfies Partial<
-  Record<string, { step: StepKey; tap: string; watch: string }>
->;
+  selected: { step: "near", label: "$3.00 on Citi Bike today" },
+  capped: { step: "far", label: "$3.00 on a subsidized Citi Bike" },
+} as const satisfies Partial<Record<string, { step: StepKey; label: string }>>;
 
 // Two pieces, both portalled to body: the story's narrative beats centred on
 // screen (StoryCopy) and the bottom control bar (every control). The bar always
@@ -233,7 +242,6 @@ export default function Narrator() {
   const selected = useApp((s) => s.selected);
   const advance = useApp((s) => s.advance);
   const back = useApp((s) => s.back);
-  const layers = useApp((s) => s.layers);
   const setLayers = useApp((s) => s.setLayers);
   const exploring = useApp((s) => s.exploring);
   const setExploring = useApp((s) => s.setExploring);
@@ -289,6 +297,9 @@ export default function Narrator() {
     advance();
     setMapInteractive(true);
   };
+  // Next is the suggested action on every step except the two whose play
+  // button is (there it stays a plain nav button, enabled only once watched).
+  const primaryNext = phase !== "selected" && phase !== "capped";
 
   // The step's own actions, between Back and Next. While busy (the selection
   // flyTo, or a draw-out playing) the ride clock takes their place instead —
@@ -299,21 +310,13 @@ export default function Narrator() {
       case "capped": {
         const prompt = PROMPTS[phase];
         return (
-          <>
-            <button
-              className="pointer-events-auto inline-flex min-h-11 cursor-pointer items-center rounded-full bg-white/90 px-5 py-2 text-center text-sm leading-tight font-medium text-gray-900 shadow-lg backdrop-blur md:hidden"
-              onClick={() => play(prompt.step)}
-            >
-              {prompt.tap}
-            </button>
-            <button
-              className="pointer-events-auto hidden h-11 cursor-pointer items-center gap-2 rounded-full bg-blue-600 px-6 text-base font-semibold text-white shadow-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 md:inline-flex"
-              onClick={() => play(prompt.step)}
-            >
-              <Play size={18} fill="currentColor" />
-              {prompt.watch}
-            </button>
-          </>
+          <button
+            className={`${PRIMARY_BTN} min-h-11 min-w-0 flex-1 py-2 text-center leading-tight md:text-base`}
+            onClick={() => play(prompt.step)}
+          >
+            <Play size={18} fill="currentColor" className="shrink-0" />
+            {prompt.label}
+          </button>
         );
       }
       case "near":
@@ -326,22 +329,16 @@ export default function Narrator() {
       case "far":
         return (
           <>
+            {/* The tier toggle lives in the legend card (StepLegend). */}
             {!exploring && (
-              <>
-                <LayerToggle layers={layers} onChange={setLayers} />
-                <button
-                  className={NAV_BTN}
-                  aria-label="Replay"
-                  title="Replay"
-                  onClick={() => replay("far")}
-                >
-                  <RotateCcw size={16} />
-                </button>
-              </>
+              <button className={ALT_BTN} onClick={() => replay("far")}>
+                <RotateCcw size={16} />
+                Replay
+              </button>
             )}
             {/* One-shot: on, pick a dock on the map, and it switches off. */}
             <button
-              className={NAV_BTN}
+              className={`${NAV_BTN} min-w-0 flex-1`}
               aria-pressed={exploring}
               aria-label={
                 exploring ? "Cancel picking a station" : "Pick another station"
@@ -375,57 +372,68 @@ export default function Narrator() {
       {createPortal(<StoryCopy />, document.body)}
       {createPortal(
         selected && (
-          <div className="pointer-events-none fixed inset-x-0 bottom-0 flex items-center justify-center gap-2 p-4 pb-6 md:pb-10">
-            <button
-              className={NAV_BTN}
-              aria-label="Back"
-              disabled={busy}
-              onClick={goBack}
-            >
-              <ChevronLeft size={20} />
-              <span className="hidden pr-1 md:inline">Back</span>
-            </button>
+          <div className="pointer-events-none fixed inset-x-0 bottom-0 flex justify-center p-4 pb-6 md:pb-10">
+            {/* Fixed-width row: Back and Next pin to the edges, the step's own
+                actions (or the ride clock) stretch across the middle. */}
+            <div className="flex w-full max-w-xl items-center justify-between gap-2">
+              <button
+                className={NAV_BTN}
+                aria-label="Back"
+                disabled={busy}
+                onClick={goBack}
+              >
+                <ChevronLeft size={20} />
+                <span className="hidden pr-1 md:inline">Back</span>
+              </button>
 
-            <AnimatePresence mode="wait">
-              {busy && story ? (
-                <motion.div
-                  key="clock"
-                  className="flex min-w-0 shrink items-center"
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.95 }}
-                  transition={{ duration: 0.2 }}
-                >
-                  <RideClock story={story} />
-                </motion.div>
-              ) : (
-                actions && (
+              <AnimatePresence mode="wait">
+                {busy && story ? (
                   <motion.div
-                    key={phase}
-                    className="flex min-w-0 shrink items-center gap-2"
+                    key="clock"
+                    className="flex min-w-0 flex-1 items-center justify-center"
                     initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0, scale: 0.95 }}
                     transition={{ duration: 0.2 }}
                   >
-                    {actions}
+                    <RideClock story={story} />
                   </motion.div>
-                )
-              )}
-            </AnimatePresence>
+                ) : (
+                  actions && (
+                    <motion.div
+                      key={phase}
+                      className="flex min-w-0 flex-1 items-center justify-center gap-2"
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.95 }}
+                      transition={{ duration: 0.2 }}
+                    >
+                      {actions}
+                    </motion.div>
+                  )
+                )}
+              </AnimatePresence>
 
-            {phase !== "final" && (
-              <button
-                className={NAV_BTN}
-                aria-label="Next"
-                title={gated ? "Watch the animation first" : undefined}
-                disabled={busy || gated}
-                onClick={goNext}
-              >
-                <span className="hidden pl-1 md:inline">Next</span>
-                <ChevronRight size={20} />
-              </button>
-            )}
+              {phase !== "final" ? (
+                <button
+                  className={primaryNext ? NAV_PRIMARY : NAV_BTN}
+                  aria-label="Next"
+                  title={gated ? "Watch the animation first" : undefined}
+                  disabled={busy || gated}
+                  onClick={goNext}
+                >
+                  <span className="hidden pl-1 md:inline">Next</span>
+                  <ChevronRight size={20} />
+                </button>
+              ) : (
+                // Same footprint as Next, so Back and the middle stay put on
+                // the last step instead of sliding over.
+                <span aria-hidden className={`${NAV_BTN} invisible`}>
+                  <span className="hidden pl-1 md:inline">Next</span>
+                  <ChevronRight size={20} />
+                </span>
+              )}
+            </div>
           </div>
         ),
         document.body,
