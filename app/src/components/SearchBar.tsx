@@ -163,7 +163,9 @@ export function SearchBar({ mapCenter, onSelect, onClear }: SearchBarProps) {
 
       {open && suggestions.length > 0 && (
         <ul
-          className="absolute z-20 mt-2 max-h-80 w-full overflow-auto rounded-2xl border
+          // Opens upward on a phone, where the bar sits at the bottom of the
+          // screen (Map.tsx); downward from md, where it's at the top.
+          className="absolute bottom-full z-20 mb-2 max-h-80 w-full overflow-auto rounded-2xl border md:top-full md:bottom-auto md:mt-2 md:mb-0
                       border-slate-100 bg-white py-1.5 shadow-lg ring-1 ring-black/5
                       animate-in fade-in slide-in-from-top-1 duration-150"
         >
@@ -202,7 +204,7 @@ export function SearchBar({ mapCenter, onSelect, onClear }: SearchBarProps) {
         query.length >= 3 &&
         suggestions.length === 0 && (
           <div
-            className="absolute z-20 mt-2 w-full rounded-2xl border border-slate-100 bg-white
+            className="absolute bottom-full z-20 mb-2 w-full rounded-2xl border border-slate-100 bg-white md:top-full md:bottom-auto md:mt-2 md:mb-0
                           px-4 py-3 text-sm text-slate-400 shadow-lg ring-1 ring-black/5"
           >
             No results for "{query}"

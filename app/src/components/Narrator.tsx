@@ -375,7 +375,7 @@ export default function Narrator() {
       {createPortal(<StoryCopy />, document.body)}
       {createPortal(
         selected && (
-          <div className="pointer-events-none fixed inset-x-0 bottom-0 flex items-center justify-center gap-2 p-4 pb-10">
+          <div className="pointer-events-none fixed inset-x-0 bottom-0 flex items-center justify-center gap-2 p-4 pb-6 md:pb-10">
             <button
               className={NAV_BTN}
               aria-label="Back"
