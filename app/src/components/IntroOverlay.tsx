@@ -41,8 +41,11 @@ export default function IntroOverlay({
           Citi Bike is too expensive. In just five years, the price to ride an
           e-bike has tripled. $3 is the price of a subway or bus fare, but it
           will only buy a Citi Bike member <strong>11 minutes</strong> of
-          riding. Choose a Citi
-          Bike station to see how far $3.00 will get you in New York City.
+          riding.
+        </p>
+        <p className="text-base leading-relaxed md:text-lg">
+          Choose a Citi Bike station to see how far $3.00 will get you in New
+          York City.
         </p>
         <div className="flex flex-col gap-3">
           {search}
