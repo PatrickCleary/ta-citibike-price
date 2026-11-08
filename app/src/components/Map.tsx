@@ -47,6 +47,7 @@ import { X } from "lucide-react";
 import IntroOverlay from "./IntroOverlay";
 import type { FeatureCollection, Point } from "geojson";
 import {
+  AttributionControl,
   Layer,
   Map as MaplibreMap,
   Source,
@@ -276,6 +277,12 @@ function MapView({
   // New pick (or deselect) → reset the per-pick latch so the next pick re-applies
   // origin styling from a clean slate; clear the trip lines on deselect.
   useEffect(() => {
+    // An address search drops a pin to pick a dock near; once a dock is
+    // picked the pin has done its job.
+    if (selected) {
+      markerRef.current?.remove();
+      markerRef.current = null;
+    }
     storyRef.current?.resetPick();
     shedsRef.current?.setData(null);
     // Also on a far-step switch: drop the old origin's lines rather than leave
@@ -398,7 +405,17 @@ function MapView({
             onMouseLeave={handleMouseLeave}
             dragRotate={false}
             touchPitch={false}
+            // Attribution is placed by hand below: bottom-right on desktop as
+            // usual, top-right and folded to its ⓘ on a phone, where the
+            // bottom belongs to the search bar, the legend card and the
+            // control bar.
+            attributionControl={false}
           >
+            <AttributionControl
+              key={isMobile ? "top-right" : "bottom-right"}
+              position={isMobile ? "top-right" : "bottom-right"}
+              compact={isMobile}
+            />
             {/* Edge of the service area. First of ours, so the walksheds and
                 trip lines (inserted under the docks on load) and the docks
                 themselves all stack above it. */}
@@ -452,7 +469,16 @@ function MapView({
       </div>
 
       <div className="fixed inset-0 pointer-events-none">
-        <div className="m-4 ml-16 flex justify-center flex flex-col gap-3 md:w-md">
+        {/* The card column: top-left, clear of the logo button. On a phone it
+            sits full-width at the bottom instead — the search bar in the intro,
+            the map key during the story (they never show together), the latter
+            just above the control bar (Narrator: p-4 pb-6 around 44px buttons
+            → the buttons start 68px up; 8px of air above them). */}
+        <div
+          className={`fixed inset-x-3 flex flex-col gap-3 md:static md:m-4 md:ml-16 md:w-md ${
+            showCard ? "bottom-[76px]" : "bottom-6"
+          }`}
+        >
           {/* The intro is just the search bar — the pitch lives in IntroOverlay. */}
           {phase !== "intro" && <Narrator />}
           {/* The map key, only on the two steps that have one, titled with the
@@ -465,12 +491,12 @@ function MapView({
                 animate={{
                   opacity: 1,
                   y: 0,
-                  height: height > 0 ? height + 24 : "auto",
+                  height: height > 0 ? height + (isMobile ? 16 : 24) : "auto",
                 }}
                 exit={{ opacity: 0, y: -8 }}
                 transition={{ type: "spring", stiffness: 300, damping: 30 }}
                 style={{ overflow: "hidden" }}
-                className="pointer-events-auto w-fit max-w-full rounded-xl bg-white/85 px-4 py-3 shadow-lg backdrop-blur"
+                className="pointer-events-auto w-full max-w-full rounded-xl bg-white/85 px-3 py-2 shadow-lg backdrop-blur md:w-fit md:px-4 md:py-3"
               >
                 <div ref={ref} className="flex flex-col gap-1.5">
                   {/* Station name + clear, desktop only: on a phone the card
