@@ -458,7 +458,16 @@ function MapView({
       </div>
 
       <div className="fixed inset-0 pointer-events-none">
-        <div className="m-4 ml-16 flex justify-center flex flex-col gap-3 md:w-md">
+        {/* The card column: top-left, clear of the logo button. On a phone the
+            map key instead sits full-width just above the bottom control bar
+            (Narrator: p-4 pb-10 around 44px buttons → 100px tall). */}
+        <div
+          className={
+            showCard
+              ? "fixed inset-x-4 bottom-[108px] flex flex-col gap-3 md:static md:m-4 md:ml-16 md:w-md"
+              : "m-4 ml-16 flex flex-col gap-3 md:w-md"
+          }
+        >
           {/* The intro is just the search bar — the pitch lives in IntroOverlay. */}
           {phase !== "intro" && <Narrator />}
           {/* The map key, only on the two steps that have one, titled with the
@@ -476,7 +485,7 @@ function MapView({
                 exit={{ opacity: 0, y: -8 }}
                 transition={{ type: "spring", stiffness: 300, damping: 30 }}
                 style={{ overflow: "hidden" }}
-                className="pointer-events-auto w-fit max-w-full rounded-xl bg-white/85 px-4 py-3 shadow-lg backdrop-blur"
+                className="pointer-events-auto w-full max-w-full rounded-xl bg-white/85 px-4 py-3 shadow-lg backdrop-blur md:w-fit"
               >
                 <div ref={ref} className="flex flex-col gap-1.5">
                   {/* Station name + clear, desktop only: on a phone the card
