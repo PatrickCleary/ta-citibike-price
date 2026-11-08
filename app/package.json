@@ -7,6 +7,8 @@
     "dev": "astro dev",
     "build:data": "node scripts/build-data.mjs",
     "build:coverage": "node scripts/build-coverage.mjs",
+    "build:landmark-areas": "node scripts/build-landmark-areas.mjs",
+    "build:landmark-reach": "node scripts/build-landmark-reach.mjs",
     "build": "node scripts/build-data.mjs && astro build",
     "preview": "astro preview",
     "astro": "astro"
