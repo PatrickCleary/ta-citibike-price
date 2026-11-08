@@ -1,20 +1,15 @@
-import type { ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { useApp, type Phase } from "../lib/store";
+import { useRoutes, useWalkshed } from "../lib/queries";
+import { landmarkReach } from "../lib/landmarkReach";
+import type { Landmark } from "../data/landmarks";
 
 // The story's narrative beats, centred over the map. Separate from the
 // top-left card (station name + legends) and the bottom bar (controls), so the
 // copy reads as the moment's headline rather than a caption.
 const COPY: Partial<Record<Phase, ReactNode>> = {
-  reflect: (
-    <>
-      <p>This is how far a $3 ride on a Citi Bike can take you currently.</p>
-      <p>
-        That’s not very far at all — does that get you to work, to your
-        friends’ apartments?
-      </p>
-    </>
-  ),
+  reflect: <ReflectCopy />,
   subsidy: (
     <p>
       Now, if New York subsidized Citi Bike — like it subsidizes every bus,
@@ -45,6 +40,81 @@ const COPY: Partial<Record<Phase, ReactNode>> = {
     </>
   ),
 };
+
+// The reflect step grounds the shed in places: the farthest landmarks it reaches
+// and the nearest it misses (landmarkReach). Both come from data that's already
+// loaded for the map — the pick's walkshed and its routes file (for the origin)
+// — so there's nothing extra to fetch. Until they're in, or when a pick has no
+// shed, the sentence is simply left out.
+function ReflectCopy() {
+  const selected = useApp((s) => s.selected);
+  const walkshed = useWalkshed(selected?.id ?? null);
+  const routes = useRoutes(selected?.id ?? null);
+  const origin = routes.data?.origin;
+  const shed = walkshed.data;
+  const reach = useMemo(
+    () => (shed && origin ? landmarkReach(shed, 11, origin) : null),
+    [shed, origin],
+  );
+  const can = reach?.reachable ?? [];
+  const cant = reach?.unreachable ?? [];
+  return (
+    <>
+      <p>This is how far a $3 ride on a Citi Bike can take you currently.</p>
+      {(can.length > 0 || cant.length > 0) && (
+        <p>
+          {can.length > 0 && cant.length > 0 ? (
+            <>
+              You can get to <Places list={can} />, but not{" "}
+              <Places list={cant} join="or" />.
+            </>
+          ) : can.length > 0 ? (
+            <>
+              You can get to <Places list={can} />.
+            </>
+          ) : (
+            <>
+              You can’t even get to <Places list={cant} join="or" />.
+            </>
+          )}
+        </p>
+      )}
+      <p>
+        That’s not very far at all — does that get you to work, to your
+        friends’ apartments?
+      </p>
+    </>
+  );
+}
+
+// "A, B and C" / "A, B or C" — each a Place.
+function Places({ list, join = "and" }: { list: Landmark[]; join?: "and" | "or" }) {
+  return (
+    <>
+      {list.map((l, i) => (
+        <span key={l.id}>
+          {i > 0 && (i === list.length - 1 ? ` ${join} ` : ", ")}
+          <Place l={l} />
+        </span>
+      ))}
+    </>
+  );
+}
+
+// A landmark named inline, with its map emoji so the sentence and the label on
+// the map read as the same thing.
+function Place({ l }: { l: Landmark }) {
+  return (
+    <span className="font-semibold whitespace-nowrap">
+      {l.emoji && (
+        <span aria-hidden="true" className="mr-1">
+          {l.emoji}
+        </span>
+      )}
+      {l.name}
+    </span>
+  );
+}
 
 export default function StoryCopy() {
   const phase = useApp((s) => s.phase);
