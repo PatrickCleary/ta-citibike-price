@@ -24,3 +24,16 @@ body {
     transform: none;
   }
 }
+
+/* Landmark labels (Landmarks.tsx) mount as the draw-out camera brings them into
+   view; they hold invisible for a beat, then rise in. */
+@keyframes landmark-in {
+  from {
+    opacity: 0;
+    transform: translateX(-3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

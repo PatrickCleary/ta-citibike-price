@@ -22,6 +22,7 @@ import {
   loadDockIcon,
 } from "../lib/dockController";
 import StationBubbles from "./StationBubble";
+import Landmarks from "./Landmarks";
 import { TripLines } from "../lib/tripLines";
 import { useApp, useHover } from "../lib/store";
 import { useReach, useRoutes, useWalkshed } from "../lib/queries";
@@ -30,7 +31,13 @@ import { useMapStore } from "../lib/mapStore";
 import { StoryController } from "../lib/storyController";
 import { WalkshedLayer, walkshedBounds } from "../lib/walksheds";
 import { toStation } from "../lib/handlers";
-import { FULL_VIEW } from "../lib/constants";
+import {
+  COVERAGE_LINE_COLOR,
+  COVERAGE_LINE_DASH,
+  COVERAGE_LINE_WIDTH,
+  COVERAGE_URL,
+  FULL_VIEW,
+} from "../lib/constants";
 import Narrator, { StepLegend } from "./Narrator";
 import { SearchBar } from "./SearchBar";
 import { useIsMobile } from "../lib/useIsMobile";
@@ -369,6 +376,20 @@ function MapView({
             dragRotate={false}
             touchPitch={false}
           >
+            {/* Edge of the service area. First of ours, so the walksheds and
+                trip lines (inserted under the docks on load) and the docks
+                themselves all stack above it. */}
+            <Source id="coverage" type="geojson" data={COVERAGE_URL}>
+              <Layer
+                id="coverage-outline"
+                type="line"
+                paint={{
+                  "line-color": COVERAGE_LINE_COLOR,
+                  "line-width": COVERAGE_LINE_WIDTH,
+                  "line-dasharray": COVERAGE_LINE_DASH,
+                }}
+              />
+            </Source>
             <Source
               id={DOCKS_SOURCE}
               type="geojson"
@@ -401,6 +422,8 @@ function MapView({
             </Source>
           </MaplibreMap>
         </div>
+        {/* Orientation labels, up in every phase (Landmarks.tsx). */}
+        <Landmarks />
         {/* The dock's third look — DOM markers, zoom-gated (StationBubble.tsx). */}
         <StationBubbles stations={stations} />
       </div>
@@ -424,7 +447,7 @@ function MapView({
                 exit={{ opacity: 0, y: -8 }}
                 transition={{ type: "spring", stiffness: 300, damping: 30 }}
                 style={{ overflow: "hidden" }}
-                className="w-fit max-w-full rounded-xl bg-white/85 px-4 py-3 shadow-lg backdrop-blur"
+                className="pointer-events-auto w-fit max-w-full rounded-xl bg-white/85 px-4 py-3 shadow-lg backdrop-blur"
               >
                 <div ref={ref}>
                   <StepLegend />
