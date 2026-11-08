@@ -14,6 +14,7 @@ import { FAR_ONLY, useApp, type Layers, type StepKey } from "../lib/store";
 import { useMapStore, useSetMapInteractive } from "../lib/mapStore";
 import { useResetMap } from "../lib/mapControl";
 import { ORIGIN_EASE_MS } from "../lib/constants";
+import { useRoutes } from "../lib/queries";
 import NarrationBlock from "./NarrationBlock";
 import StoryCopy from "./StoryCopy";
 import { COLOR_ALL, COLOR_NEAR } from "../lib/tripLines";
@@ -27,57 +28,87 @@ const NAV_BTN =
 const ALT_BTN =
   "pointer-events-auto inline-flex h-11 cursor-pointer items-center gap-2 rounded-full bg-white/90 px-4 text-sm font-medium text-gray-800 shadow-lg backdrop-blur hover:bg-white disabled:cursor-default disabled:text-gray-300";
 
-const STATE_RANKS = {
-  intro: 0,
-  selected: 1,
-  near: 2,
-  reflect: 3,
-  subsidy: 4,
-  capped: 5,
-  far: 6,
-  compare: 7,
-  final: 8,
-};
-
-// Map key for a draw-out step: the docked trip dots, and the walkshed fill in
-// the colour and opacity WalkshedLayer paints that step in (orange for near;
-// the far step recolours everything indigo).
+// Map key for a draw-out step: how many docks the tier reaches, in the colour
+// its trip dots and walkshed fill are painted (orange for near; the far step
+// recolours everything indigo), then one quiet line for the shaded walksheds.
 const LEGEND_LABELS: Record<StepKey, string> = {
-  near: "Stations within a $3 fare today (11 min)",
-  far: "Stations within a $3 capped fare (45 min)",
+  near: "stations within a $3 fare today (11 min)",
+  far: "stations within a $3 capped fare (45 min)",
 };
+const TIER_KEY: Record<StepKey, "11" | "45"> = { near: "11", far: "45" };
 
 const rgbOf = (step: StepKey) => (step === "near" ? COLOR_NEAR : COLOR_ALL);
 
 function Legend({ steps }: { steps: StepKey[] }) {
+  const selected = useApp((s) => s.selected);
+  // Same query Map.tsx fires on pick, so this is a cache hit by the time the
+  // near step shows. The 45 set is a superset of 11, so each is a plain count.
+  const routes = useRoutes(selected?.id ?? null).data;
   return (
-    <ul className="mb-1 flex flex-col gap-1.5 text-sm text-gray-700">
-      {steps.map((step) => {
-        const [r, g, b] = rgbOf(step);
-        return (
-          <li key={step} className="flex flex-col gap-1.5">
-            <span className="flex items-center gap-2">
+    <div className="flex flex-col gap-1.5">
+      <ul className="flex flex-col gap-0.5 text-sm text-gray-800">
+        {steps.map((step) => {
+          const [r, g, b] = rgbOf(step);
+          const count = routes
+            ? Object.keys(routes[TIER_KEY[step]]).length
+            : null;
+          return (
+            <li key={step} className="flex items-baseline gap-1.5">
               <span
-                className="size-2.5 shrink-0 rounded-full ring-1 ring-white"
-                style={{ background: `rgb(${r},${g},${b})` }}
-              />
-              {LEGEND_LABELS[step]}
-            </span>
-            <span className="flex items-center gap-2">
+                className="text-xl font-semibold tabular-nums"
+                style={{ color: `rgb(${r},${g},${b})` }}
+              >
+                {count == null ? "—" : count.toLocaleString()}
+              </span>
+              <span>{LEGEND_LABELS[step]}</span>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="flex items-center gap-1.5 text-xs text-gray-500">
+        <span className="flex shrink-0 gap-1">
+          {steps.map((step) => {
+            const [r, g, b] = rgbOf(step);
+            return (
               <span
-                className="size-3 shrink-0 rounded-sm border"
+                key={step}
+                className="size-3 rounded-sm border"
                 style={{
                   background: `rgba(${r},${g},${b},${TIERS[step].fill})`,
                   borderColor: TIERS[step].color,
                 }}
               />
-              5-minute walk from a reachable station
-            </span>
-          </li>
-        );
-      })}
-    </ul>
+            );
+          })}
+        </span>
+        Shaded areas are a 5-minute walk from a reachable station.
+      </p>
+    </div>
   );
+}
+
+// The top-left card's content: the current step's map key. Only the two
+// draw-out steps have one; Map.tsx hides the card for every other step.
+export function StepLegend() {
+  const phase = useApp((s) => s.phase);
+  const layers = useApp((s) => s.layers);
+  const exploring = useApp((s) => s.exploring);
+  if (phase === "near") return <Legend steps={["near"]} />;
+  if (phase === "far") {
+    if (exploring) {
+      return (
+        <p className="text-sm text-gray-800">
+          Tap any station on the map to see how far it gets you.
+        </p>
+      );
+    }
+    return (
+      <Legend
+        steps={(["near", "far"] as StepKey[]).filter((k) => layers[k])}
+      />
+    );
+  }
+  return null;
 }
 
 // The far step's tier toggle: a segment per tier, each independently on/off,
@@ -177,28 +208,13 @@ const PROMPTS = {
   Record<string, { step: StepKey; tap: string; watch: string }>
 >;
 
-const slideVariants = {
-  enter: (direction: number) => ({
-    x: direction > 0 ? "20%" : "-20%",
-    opacity: 0,
-  }),
-  center: {
-    x: 0,
-    opacity: 1,
-  },
-  exit: (direction: number) => ({
-    x: direction > 0 ? "-20%" : "20%",
-    opacity: 0,
-  }),
-};
-
-// Three pieces: the narration card (top-left, rendered in place — the legends),
-// the story's narrative beats centred on screen (StoryCopy,
-// portalled), and the bottom control bar (portalled — every control). The bar
-// always has Back/Next, so any step can step to its neighbour; its middle holds
-// the step's own actions — the play buttons, Replay, and the far step's layer
-// toggle — which are separate from navigation. Not mounted in the intro
-// (Map.tsx shows just the search bar there).
+// Two pieces, both portalled to body: the story's narrative beats centred on
+// screen (StoryCopy) and the bottom control bar (every control). The bar always
+// has Back/Next, so any step can step to its neighbour; its middle holds the
+// step's own actions — the play buttons, Replay, and the far step's layer
+// toggle — which are separate from navigation. Renders nothing in place; the
+// top-left card is StepLegend, mounted by Map.tsx only on the steps that have
+// a map key. Not mounted in the intro (Map.tsx shows just the search bar there).
 export default function Narrator() {
   const phase = useApp((s) => s.phase);
   const selected = useApp((s) => s.selected);
@@ -214,17 +230,6 @@ export default function Narrator() {
   const resetMap = useResetMap();
   const [busy, setBusy] = useState(false);
   const setMapInteractive = useSetMapInteractive();
-
-  const [prevPhase, setPrevPhase] = useState(phase);
-  const [direction, setDirection] = useState(0);
-
-  if (phase !== prevPhase) {
-    const currentRank = STATE_RANKS[prevPhase];
-    const nextRank = STATE_RANKS[phase];
-
-    setDirection(nextRank > currentRank ? 1 : -1);
-    setPrevPhase(phase);
-  }
 
   // Gate the controls for the duration of the selection flyTo (see mapControl)
   // so a draw-out can't start before the camera settles on the origin.
@@ -351,40 +356,9 @@ export default function Narrator() {
   })();
 
   return (
-    <div className="pointer-events-auto flex flex-col gap-1">
-      <div className="flex flex-col w-full mt-2 md:mb-2">
-        <AnimatePresence initial={false} custom={direction} mode="wait">
-          <motion.div
-            key={phase} // Triggers animation when Zustand phase updates
-            custom={direction}
-            variants={slideVariants}
-            initial="enter"
-            animate="center"
-            exit="exit"
-            transition={{ type: "spring", stiffness: 300, damping: 30 }}
-            style={{
-              width: "100%",
-              height: "100%",
-            }}
-          >
-            {phase === "near" && <Legend steps={["near"]} />}
-
-            {phase === "far" &&
-              (exploring ? (
-                <p>Tap any station on the map to see how far it gets you.</p>
-              ) : (
-                <Legend
-                  steps={(["near", "far"] as StepKey[]).filter(
-                    (k) => layers[k],
-                  )}
-                />
-              ))}
-          </motion.div>
-        </AnimatePresence>
-      </div>
-      {/* The bottom control bar. Portalled out because the card's backdrop-blur
-          would otherwise become the containing block for `fixed` and pin it
-          inside the card. */}
+    <>
+      {/* Portalled to body: a `fixed` bar inside a backdrop-blurred card
+          would take the card as its containing block and get pinned inside it. */}
       {createPortal(<StoryCopy />, document.body)}
       {createPortal(
         selected && (
@@ -443,6 +417,6 @@ export default function Narrator() {
         ),
         document.body,
       )}
-    </div>
+    </>
   );
 }
