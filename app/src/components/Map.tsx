@@ -94,6 +94,10 @@ function MapView({
   const [intro, setIntro] = useState(false); // intro ripple already played?
   const [splash, setSplash] = useState(true); // IntroOverlay open? (on first load, or via the corner dot)
   const markerRef = useRef<maplibregl.Marker>(null);
+  // A camera move to make once the intro frame has been painted (see
+  // handleSelect: an address search mid-story resets to the intro first, and
+  // showIntro's jump would otherwise cancel the fly).
+  const pendingFlyRef = useRef<{ center: [number, number]; zoom: number } | null>(null);
   const docksRef = useRef<DockController>(null);
   const tripsRef = useRef<TripLines>(null);
   const shedsRef = useRef<WalkshedLayer>(null);
@@ -223,11 +227,21 @@ function MapView({
 
   const handleSelect = useCallback((result: Suggestion) => {
     if (result.id && result.label && result.lon && result.lat) {
-      mapRef.current?.flyTo({
-        center: [result.lon, result.lat],
+      const fly = {
+        center: [result.lon, result.lat] as [number, number],
         zoom: result.type === "station" ? 16 : 15,
-        duration: 800,
-      });
+      };
+      // A search is a fresh start. Picking a station resets the story through
+      // setSelected; an address mid-story has to drop the old pick itself,
+      // or its trips and sheds would stay up under the new marker. Landing on
+      // the intro paints its frame (a camera jump), so the fly waits for it.
+      if (result.type !== "station" && useApp.getState().selected) {
+        useApp.getState().setSelected(null);
+        docksRef.current?.reset();
+        pendingFlyRef.current = fly;
+      } else {
+        mapRef.current?.flyTo({ ...fly, duration: 800 });
+      }
 
       markerRef.current?.remove();
       markerRef.current = null;
@@ -275,9 +289,15 @@ function MapView({
     const story = storyRef.current;
     if (!story) return;
     switch (phase) {
-      case "intro":
+      case "intro": {
         story.showIntro();
+        const fly = pendingFlyRef.current;
+        if (fly) {
+          pendingFlyRef.current = null;
+          mapRef.current?.flyTo({ ...fly, duration: 800 });
+        }
         break;
+      }
       case "selected":
         story.showOrigin();
         break;
@@ -453,8 +473,11 @@ function MapView({
                 className="pointer-events-auto w-fit max-w-full rounded-xl bg-white/85 px-4 py-3 shadow-lg backdrop-blur"
               >
                 <div ref={ref} className="flex flex-col gap-1.5">
+                  {/* Station name + clear, desktop only: on a phone the card
+                      has no width to spare, and Back on the first step already
+                      returns to the start. */}
                   {selected && (
-                    <div className="flex items-center justify-between gap-3">
+                    <div className="hidden items-center justify-between gap-3 md:flex">
                       <h2
                         className="text-xs font-bold leading-tight"
                         style={{ color: BRAND_ORANGE }}
