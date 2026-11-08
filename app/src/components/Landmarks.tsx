@@ -2,9 +2,10 @@
 // (data/landmarks.ts), so someone watching the trip lines ride out can tell
 // Midtown from Astoria without street labels (the basemap has none).
 //
-// They're up throughout the story, but not while a dock is being picked — the
-// intro's city-wide field, and the far step's "another station" explore mode —
-// where the docks are the point and labels over them would only get in the way.
+// They arrive once a draw-out has settled, and never before: not in the intro
+// or the first step, not while trips are riding out (or a replay is rewinding),
+// and not in the far step's "another station" explore mode. The draw-out is the
+// show; the labels are for reading the finished frame.
 //
 // Labels are collision-culled per frame (see BY_PRIORITY), so the wide far-step
 // frame shows as many as fit, iconic ones first, and the rest arrive as the
@@ -63,9 +64,12 @@ const APPEAR_MS = 350;
 
 export default function Landmarks() {
   const map = useMapStore((s) => s.map);
-  // Picking a dock: the intro, or exploring on the far step.
-  const picking = useApp((s) => s.phase === "intro" || s.exploring);
-  const placed = useVisibleLandmarks(picking ? null : map);
+  // Before any draw-out (intro, first step), or picking a dock (exploring).
+  const early = useApp(
+    (s) => s.phase === "intro" || s.phase === "selected" || s.exploring,
+  );
+  const playing = useDrawOutPlaying();
+  const placed = useVisibleLandmarks(early || playing ? null : map);
 
   const byId = useMemo(
     () => new globalThis.Map(LANDMARKS.map((l) => [l.id, l])),
@@ -88,6 +92,24 @@ export default function Landmarks() {
       })}
     </>
   );
+}
+
+// True while a draw-out is running (or a replay is rewinding to start one).
+// The story controller exposes this as its ride clock, polled rather than
+// pushed (see Narrator's RideClock), so a cheap interval watches it.
+function useDrawOutPlaying(): boolean {
+  const [playing, setPlaying] = useState(false);
+  useEffect(() => {
+    const check = () => {
+      const story = useMapStore.getState().story;
+      const now = story?.rideProgress() != null;
+      setPlaying((was) => (was === now ? was : now));
+    };
+    check();
+    const id = setInterval(check, 150);
+    return () => clearInterval(id);
+  }, []);
+  return playing;
 }
 
 // A placed landmark: `compact` means icon only, the name having lost its space.
