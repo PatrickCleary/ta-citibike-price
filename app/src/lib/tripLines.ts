@@ -47,13 +47,21 @@ const SETTLED_ALPHA = 0.65;
 const SETTLE_MS = 600;
 const WHITE: [number, number, number] = [255, 255, 255];
 
-// Auto-fit breathing room, in px. The narrow mobile viewport can't spare much,
-// so it gets a tighter frame than desktop.
+// Auto-fit breathing room, in px. The frame is fitted to the docked POINTS, but
+// each step's walkshed reaches a 5-minute walk past them, so the sides need
+// room for that halo; the bottom also clears the control bar (Narrator: fixed
+// at bottom-0, p-4 pb-10, ~44px of buttons → ~100px tall). The narrow mobile
+// viewport can't spare as much, so it gets a tighter frame than desktop.
 const MOBILE_BREAKPOINT = 768;
-const FIT_PADDING_MOBILE = 20;
-const FIT_PADDING_DESKTOP = 50;
-const fitPadding = () =>
-  window.innerWidth < MOBILE_BREAKPOINT ? FIT_PADDING_MOBILE : FIT_PADDING_DESKTOP;
+const FIT_PADDING_MOBILE = 40;
+const FIT_PADDING_DESKTOP = 80;
+const CONTROL_BAR_PX = 110; // extra at the bottom, under the step controls
+type Padding = { top: number; bottom: number; left: number; right: number };
+const fitPadding = (): Padding => {
+  const p =
+    window.innerWidth < MOBILE_BREAKPOINT ? FIT_PADDING_MOBILE : FIT_PADDING_DESKTOP;
+  return { top: p, bottom: p + CONTROL_BAR_PX, left: p, right: p };
+};
 
 // Comet tail length, in ride-seconds. Speed is constant (SPEED_MPS), so this is
 // a fixed on-the-ground length: each line is a moving segment of this span that
@@ -462,12 +470,13 @@ export class TripLines {
     const w = el.clientWidth;
     const h = el.clientHeight;
     const p = fitPadding();
-    // Guard a viewport too small to inset (narrow phones, split panes).
-    const px = Math.min(p, Math.max(0, w / 2 - 1));
-    const py = Math.min(p, Math.max(0, h / 2 - 1));
+    // Guard a viewport too small to inset (narrow phones, split panes): no
+    // side may eat past the middle.
+    const clampX = (v: number) => Math.min(v, Math.max(0, w / 2 - 1));
+    const clampY = (v: number) => Math.min(v, Math.max(0, h / 2 - 1));
     // unproject takes CSS pixels — clientWidth/Height, not the DPR-scaled canvas.
-    const sw = this.map.unproject([px, h - py]);
-    const ne = this.map.unproject([w - px, py]);
+    const sw = this.map.unproject([clampX(p.left), h - clampY(p.bottom)]);
+    const ne = this.map.unproject([w - clampX(p.right), clampY(p.top)]);
     this.pointBounds = [
       [sw.lng, sw.lat],
       [ne.lng, ne.lat],
