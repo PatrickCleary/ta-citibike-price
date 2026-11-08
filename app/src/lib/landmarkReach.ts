@@ -3,12 +3,24 @@
 // it ("You can get to A, B and C, but not D, E or F."); the compare step names
 // the farthest iconic (tier 1) ones the ≤45-minute shed reaches.
 //
-// Cheap enough to do per pick at runtime: 87 points against one shed with a
-// plain ray-cast, no precomputation.
+// "Reaches" means any part of the place: the pin, or any point sampled along
+// its footprint (data/landmarkAreas.json, from OpenStreetMap via
+// scripts/build-landmark-areas.mjs) — a park's pin sits in its middle, but a
+// ride to its edge has reached the park. Landmarks no station's walkshed ever
+// covers (data/landmarkReachability.json, scripts/build-landmark-reach.mjs) are
+// left out of both lists: "but not JFK" would be true from everywhere.
+//
+// Cheap enough to do per pick at runtime: a few thousand points against one
+// shed with a plain ray-cast, no precomputation beyond those two data files.
 
 import type { MultiPolygon, Polygon, Position } from "geojson";
 import { LANDMARKS, type Landmark } from "../data/landmarks";
+import areas from "../data/landmarkAreas.json";
+import everReachable from "../data/landmarkReachability.json";
 import type { Walkshed } from "./walksheds";
+
+const AREAS = areas as unknown as Record<string, [number, number][]>;
+const EVER = everReachable as Record<string, boolean>;
 
 export interface LandmarkReach {
   /** Reachable landmarks, farthest from the origin first (up to `count`). */
@@ -43,6 +55,17 @@ function inGeometry(p: [number, number], g: Polygon | MultiPolygon): boolean {
     : g.coordinates.some((rings) => inPolygon(p, rings));
 }
 
+// Does the shed cover any part of the landmark?
+export function reaches(
+  l: Landmark,
+  shapes: (Polygon | MultiPolygon)[],
+): boolean {
+  const pin: [number, number] = [l.lon, l.lat];
+  if (shapes.some((g) => inGeometry(pin, g))) return true;
+  const edge = AREAS[l.id];
+  return !!edge && edge.some((p) => shapes.some((g) => inGeometry(p, g)));
+}
+
 // Straight-line metres, equirectangular — plenty for ranking.
 function meters(a: [number, number], b: [number, number]): number {
   const cosLat = Math.cos((a[1] * Math.PI) / 180);
@@ -64,9 +87,9 @@ export function landmarkReach(
   const outside: { l: Landmark; d: number }[] = [];
   for (const l of LANDMARKS) {
     if (only && !only(l)) continue;
-    const p: [number, number] = [l.lon, l.lat];
-    const d = meters(origin, p);
-    (shapes.some((g) => inGeometry(p, g)) ? inside : outside).push({ l, d });
+    if (EVER[l.id] === false) continue; // no ride from anywhere gets there
+    const d = meters(origin, [l.lon, l.lat]);
+    (reaches(l, shapes) ? inside : outside).push({ l, d });
   }
   inside.sort((a, b) => b.d - a.d); // farthest first
   outside.sort((a, b) => a.d - b.d); // nearest first
