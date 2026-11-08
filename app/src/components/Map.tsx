@@ -8,9 +8,11 @@ import useMeasure from "react-use-measure";
 import {
   DockController,
   stationPaint,
+  stationHitPaint,
   DOCKS_SOURCE,
   DOCKS_PIN_SOURCE,
   DOCKS_LAYER,
+  DOCKS_HIT_LAYER,
   DOCKS_ICON_LAYER,
   ZOOM_CIRCLE,
   ZOOM_BUBBLE_FULL,
@@ -192,7 +194,13 @@ function MapView({
   );
 
   const handleMouseMove = useCallback((e: MapLayerMouseEvent) => {
-    // Pointer over anything pickable (pins; dots too while exploring).
+    // Bubbles live inside the canvas container, so MapLibre still reports
+    // mousemove over one — with no dock under that pixel, since the bubble
+    // hangs above its dot. Leave the hover alone there: the bubble is the
+    // hovered dock's own label, and clearing it would yank it out from under
+    // the pointer. (Pins were tall enough to mask this; dots aren't.)
+    if (e.originalEvent.target !== e.target.getCanvas()) return;
+    // Pointer over anything pickable (dots, their hit pads, pins).
     e.target.getCanvas().style.cursor = e.features?.length ? "pointer" : "";
     const id = e.features?.[0]?.properties?.station_id;
     useHover.getState().setHovered(typeof id === "string" ? id : null);
@@ -335,11 +343,15 @@ function MapView({
         <div className="h-full w-full">
           <MaplibreMap
             ref={mapRef}
-            // Exploring brings the dimmed dock field back as pickable; dots
-            // count there because the far camera usually sits below the pin gate.
-            interactiveLayerIds={
-              exploring ? [DOCKS_LAYER, DOCKS_ICON_LAYER] : [DOCKS_ICON_LAYER]
-            }
+            // Dots and pins are both pickable: the intro's city view and the
+            // far-step camera while exploring both sit below the pin gate, so
+            // the dots are the only target there. Mid-story handleClick ignores
+            // picks anyway, and StationBubble gates the hover label on the field.
+            interactiveLayerIds={[
+              DOCKS_HIT_LAYER,
+              DOCKS_LAYER,
+              DOCKS_ICON_LAYER,
+            ]}
             mapStyle={STYLE_URL}
             initialViewState={{
               latitude: FULL_VIEW.center[1],
@@ -363,6 +375,12 @@ function MapView({
               maxzoom={13}
               buffer={512}
             >
+              {/* Hit target first so it renders beneath the visible dot. */}
+              <Layer
+                id={DOCKS_HIT_LAYER}
+                type="circle"
+                paint={stationHitPaint()}
+              />
               <Layer id={DOCKS_LAYER} type="circle" paint={stationPaint(0)} />
             </Source>
             <Source

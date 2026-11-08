@@ -17,7 +17,7 @@ import { ScatterplotLayer } from "@deck.gl/layers";
 import polyline from "@mapbox/polyline";
 import type { Map } from "maplibre-gl";
 import type { Routes } from "./trips";
-import { PLAYBACK_SPEEDUP, type StepKey } from "./store";
+import { PLAYBACK_SPEEDUP, useHover, type StepKey } from "./store";
 import { DOCKS_LAYER } from "./dockController";
 
 export const COLOR_NEAR: [number, number, number] = [245, 83, 43]; // ≤11 min — brand orange
@@ -224,7 +224,16 @@ export class TripLines {
 
   constructor(map: Map) {
     this.map = map;
-    this.overlay = new MapboxOverlay({ interleaved: true, layers: [] });
+    this.overlay = new MapboxOverlay({
+      interleaved: true,
+      layers: [],
+      // Interleaved deck shares the map canvas and rewrites its cursor after
+      // every pointer move — by default to "grab", which lands a frame after
+      // Map.tsx has set "pointer" over a dock and makes the cursor flicker.
+      // Derive it from the same hover state so the two writers always agree;
+      // "" defers to MapLibre's own grab/grabbing CSS on the container.
+      getCursor: () => (useHover.getState().hoveredId ? "pointer" : ""),
+    });
     map.addControl(this.overlay);
   }
 
