@@ -30,7 +30,7 @@ const COPY: Partial<Record<Phase, ReactNode>> = {
   final: (
     <>
       <p>
-        Placeholder for TA copy about the campaign and links to resources, etc.
+        A 45-minute Citi Bike ride shouldn’t cost more than $3 — and we’re bringing Citi Bike riders together to form the City Bike Riders Union, calling for public subsidies and efficiency improvements to bring the price down. Learn more and join our movement.
       </p>
       {/* The card is pointer-events-none so clicks reach the map; the CTA opts
           back in. */}

@@ -30,8 +30,8 @@ import { useMapStore } from "../lib/mapStore";
 import { StoryController } from "../lib/storyController";
 import { WalkshedLayer, walkshedBounds } from "../lib/walksheds";
 import { toStation } from "../lib/handlers";
-import { BRAND_ORANGE, FULL_VIEW } from "../lib/constants";
-import Narrator from "./Narrator";
+import { FULL_VIEW } from "../lib/constants";
+import Narrator, { StepLegend } from "./Narrator";
 import { SearchBar } from "./SearchBar";
 import { useIsMobile } from "../lib/useIsMobile";
 import { AnimatePresence, motion } from "motion/react";
@@ -335,6 +335,8 @@ function MapView({
     : null;
 
   const [ref, { height }] = useMeasure();
+  // The card has content on the two draw-out steps only (see StepLegend).
+  const showCard = phase === "near" || phase === "far";
 
   return (
     <>
@@ -406,27 +408,30 @@ function MapView({
       <div className="fixed inset-0 pointer-events-none">
         <div className="m-4 ml-16 flex justify-center flex flex-col gap-3 md:w-md">
           {/* The intro is just the search bar — the pitch lives in IntroOverlay. */}
-          {phase !== "intro" && (
-            <motion.div
-              // 2. Animate the parent height to match the child's height
-              animate={{ height: height > 0 ? height + 24 : "auto" }}
-              transition={{ type: "spring", stiffness: 300, damping: 30 }}
-              style={{ overflow: "hidden" }} // Prevents text bleeding out during animation
-              className="rounded-xl bg-white/85 px-6 pt-4 pb-1 shadow-lg backdrop-blur"
-            >
-              <div ref={ref}>
-                {selected && (
-                  <span
-                    className="block text-2xl font-semibold"
-                    style={{ color: BRAND_ORANGE }}
-                  >
-                    {selected.name}
-                  </span>
-                )}
-                <Narrator />
-              </div>
-            </motion.div>
-          )}
+          {phase !== "intro" && <Narrator />}
+          {/* The map key, only on the two steps that have one. It's just a
+              key now — the picked station is already named by its bubble. */}
+          <AnimatePresence>
+            {showCard && (
+              <motion.div
+                key="card"
+                initial={{ opacity: 0, y: -8 }}
+                animate={{
+                  opacity: 1,
+                  y: 0,
+                  height: height > 0 ? height + 24 : "auto",
+                }}
+                exit={{ opacity: 0, y: -8 }}
+                transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                style={{ overflow: "hidden" }}
+                className="w-fit max-w-full rounded-xl bg-white/85 px-4 py-3 shadow-lg backdrop-blur"
+              >
+                <div ref={ref}>
+                  <StepLegend />
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
           {phase === "intro" && (
             <SearchBar
               mapCenter={mapRef.current?.getCenter()}
