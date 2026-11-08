@@ -276,6 +276,12 @@ function MapView({
   // New pick (or deselect) → reset the per-pick latch so the next pick re-applies
   // origin styling from a clean slate; clear the trip lines on deselect.
   useEffect(() => {
+    // An address search drops a pin to pick a dock near; once a dock is
+    // picked the pin has done its job.
+    if (selected) {
+      markerRef.current?.remove();
+      markerRef.current = null;
+    }
     storyRef.current?.resetPick();
     shedsRef.current?.setData(null);
     // Also on a far-step switch: drop the old origin's lines rather than leave
