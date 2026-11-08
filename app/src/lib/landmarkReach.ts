@@ -1,6 +1,7 @@
 // Which landmarks a pick's walkshed reaches. The story's reflect step names the
 // farthest few landmarks inside the ≤11-minute shed and the nearest few outside
-// it: "You can get to A, B and C, but not D, E or F."
+// it ("You can get to A, B and C, but not D, E or F."); the compare step names
+// the farthest iconic (tier 1) ones the ≤45-minute shed reaches.
 //
 // Cheap enough to do per pick at runtime: 87 points against one shed with a
 // plain ray-cast, no precomputation.
@@ -54,7 +55,7 @@ export function landmarkReach(
   shed: Walkshed,
   tier: 11 | 45,
   origin: [number, number], // [lon, lat]
-  count = 3,
+  { count = 3, only }: { count?: number; only?: (l: Landmark) => boolean } = {},
 ): LandmarkReach {
   const shapes = shed.features
     .filter((f) => f.properties.tier === tier)
@@ -62,6 +63,7 @@ export function landmarkReach(
   const inside: { l: Landmark; d: number }[] = [];
   const outside: { l: Landmark; d: number }[] = [];
   for (const l of LANDMARKS) {
+    if (only && !only(l)) continue;
     const p: [number, number] = [l.lon, l.lat];
     const d = meters(origin, p);
     (shapes.some((g) => inGeometry(p, g)) ? inside : outside).push({ l, d });

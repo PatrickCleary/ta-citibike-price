@@ -16,12 +16,7 @@ const COPY: Partial<Record<Phase, ReactNode>> = {
       train, and ferry — three dollars could get you a 45-minute ride.
     </p>
   ),
-  compare: (
-    <>
-      <p>This is how far you could ride.</p>
-      <p>That's a huge difference in how far you can get for the same price!</p>
-    </>
-  ),
+  compare: <CompareCopy />,
   final: (
     <>
       <p>
@@ -79,10 +74,36 @@ function ReflectCopy() {
           )}
         </p>
       )}
-      <p>
-        That’s not very far at all — does that get you to work, to your
-        friends’ apartments?
-      </p>
+      
+    </>
+  );
+}
+
+// The compare step does the same for the ≤45-minute shed, but only with the
+// iconic (tier 1) landmarks, farthest first — the places that make the
+// subsidized ride feel like a different city.
+function CompareCopy() {
+  const selected = useApp((s) => s.selected);
+  const walkshed = useWalkshed(selected?.id ?? null);
+  const routes = useRoutes(selected?.id ?? null);
+  const origin = routes.data?.origin;
+  const shed = walkshed.data;
+  const iconic = useMemo(
+    () =>
+      shed && origin
+        ? landmarkReach(shed, 45, origin, { only: (l) => l.tier === 1 }).reachable
+        : [],
+    [shed, origin],
+  );
+  return (
+    <>
+      <p>This is how far you could ride.</p>
+      {iconic.length > 0 && (
+        <p>
+          Now you can get to <Places list={iconic} />.
+        </p>
+      )}
+      <p>That's a huge difference in how far you can get for the same price!</p>
     </>
   );
 }
