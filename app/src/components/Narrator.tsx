@@ -31,9 +31,17 @@ const ALT_BTN =
 // Map key for a draw-out step: how many docks the tier reaches, in the colour
 // its trip dots and walkshed fill are painted (orange for near; the far step
 // recolours everything indigo), then one quiet line for the shaded walksheds.
-const LEGEND_LABELS: Record<StepKey, string> = {
-  near: "stations within a $3 fare today (11 min)",
-  far: "stations within a $3 capped fare (45 min)",
+// Each label has a short form for phones, where the card is ~260px wide and
+// the full sentence wraps the count onto two lines.
+const LEGEND_LABELS: Record<StepKey, { full: string; short: string }> = {
+  near: {
+    full: "stations within a $3 fare today (11 min)",
+    short: "stations, $3 today (11 min)",
+  },
+  far: {
+    full: "stations within a $3 capped fare (45 min)",
+    short: "stations, $3 capped (45 min)",
+  },
 };
 const TIER_KEY: Record<StepKey, "11" | "45"> = { near: "11", far: "45" };
 
@@ -60,7 +68,12 @@ function Legend({ steps }: { steps: StepKey[] }) {
               >
                 {count == null ? "—" : count.toLocaleString()}
               </span>
-              <span>{LEGEND_LABELS[step]}</span>
+              <span>
+                <span className="md:hidden">{LEGEND_LABELS[step].short}</span>
+                <span className="hidden md:inline">
+                  {LEGEND_LABELS[step].full}
+                </span>
+              </span>
             </li>
           );
         })}
@@ -81,7 +94,7 @@ function Legend({ steps }: { steps: StepKey[] }) {
             );
           })}
         </span>
-        Shaded areas are a 5-minute walk from a reachable station.
+        5-minute walk from a reachable station
       </p>
     </div>
   );
