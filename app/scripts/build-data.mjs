@@ -35,9 +35,9 @@ const HIDDEN_STATIONS = new Set([
 
 // Jersey City and Hoboken are part of the system but not of this map's story,
 // so their docks are left off entirely. West of the Hudson and north of Bay
-// Ridge (whose Shore Rd docks also sit west of -74.025) is New Jersey. Same
+// Ridge (whose Shore Rd docks also sit west of the line) is New Jersey. Same
 // rule as scripts/build-coverage.mjs.
-const inNewJersey = (lon, lat) => lon < -74.025 && lat > 40.68;
+const inNewJersey = (lon, lat) => lon < -74.021 && lat > 40.68;
 
 async function buildStations() {
   const raw = JSON.parse(await readFile(STATIONS_SRC, "utf8"));

@@ -26,8 +26,10 @@ const SIMPLIFY_DEG = 0.0004; // ~40 m
 
 // Jersey City and Hoboken are part of the system but not of this map's story,
 // so their docks are left out of the outline. West of the Hudson and north of
-// Bay Ridge (whose Shore Rd docks also sit west of -74.025) is New Jersey.
-const inNewJersey = ([lon, lat]) => lon < -74.025 && lat > 40.68;
+// Bay Ridge (whose Shore Rd docks also sit west of the line) is New Jersey.
+// -74.021 splits Hoboken's north waterfront (-74.024) from Battery Park City
+// (-74.017).
+const inNewJersey = ([lon, lat]) => lon < -74.021 && lat > 40.68;
 
 const stations = JSON.parse(await readFile(STATIONS, "utf8"));
 const points = turf.featureCollection(
