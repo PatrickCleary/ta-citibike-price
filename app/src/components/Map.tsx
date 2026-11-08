@@ -32,6 +32,7 @@ import { StoryController } from "../lib/storyController";
 import { WalkshedLayer, walkshedBounds } from "../lib/walksheds";
 import { toStation } from "../lib/handlers";
 import {
+  BRAND_ORANGE,
   COVERAGE_LINE_COLOR,
   COVERAGE_LINE_DASH,
   COVERAGE_LINE_WIDTH,
@@ -432,8 +433,8 @@ function MapView({
         <div className="m-4 ml-16 flex justify-center flex flex-col gap-3 md:w-md">
           {/* The intro is just the search bar — the pitch lives in IntroOverlay. */}
           {phase !== "intro" && <Narrator />}
-          {/* The map key, only on the two steps that have one. It's just a
-              key now — the picked station is already named by its bubble. */}
+          {/* The map key, only on the two steps that have one, titled with the
+              picked station's name. */}
           <AnimatePresence>
             {showCard && (
               <motion.div
@@ -449,7 +450,15 @@ function MapView({
                 style={{ overflow: "hidden" }}
                 className="pointer-events-auto w-fit max-w-full rounded-xl bg-white/85 px-4 py-3 shadow-lg backdrop-blur"
               >
-                <div ref={ref}>
+                <div ref={ref} className="flex flex-col gap-1.5">
+                  {selected && (
+                    <h2
+                      className="text-xs font-bold leading-tight"
+                      style={{ color: BRAND_ORANGE }}
+                    >
+                      {selected.name}
+                    </h2>
+                  )}
                   <StepLegend />
                 </div>
               </motion.div>
