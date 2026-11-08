@@ -33,6 +33,9 @@ export const DOCKS_SOURCE = "stations";
 // layer would place hundreds of pins to show ~20.
 export const DOCKS_PIN_SOURCE = "stations-pins";
 export const DOCKS_LAYER = "stations";
+// Invisible circles under the dots, a few px wider, so a dot is pickable
+// without landing on its ~3px face. Same source and filter as DOCKS_LAYER.
+export const DOCKS_HIT_LAYER = "stations-hit";
 export const DOCKS_ICON_LAYER = "stations-icon";
 export const DOCK_ICON_ID = "dock-pin";
 
@@ -71,15 +74,16 @@ const ZOOM_ICON = 14.2;
 // The third look is DOM, not a layer (see StationBubble.tsx), so this gate is
 // about node count and label collision rather than paint. Both bottom out in
 // the same place, which is why one constant can serve both: a 1600×900 viewport
-// over Midtown holds ~420 docks at ZOOM_ICON but only ~40 here and ~20 by 17.2.
-// Docks sit ~250m apart, which is ~190px at this zoom — about where a ~150px
-// name bubble stops overlapping its neighbour.
-export const ZOOM_BUBBLE = 16.5;
+// over Midtown holds ~420 docks at ZOOM_ICON but only ~80 here and ~20 by 17.2.
+// Docks sit ~250m apart, which is ~135px at this zoom — tight for a ~150px name
+// bubble, so the densest Midtown blocks overlap a little until 16.5. Set to
+// match ORIGIN_ZOOM so the names are up the moment a pick's ease-in lands.
+export const ZOOM_BUBBLE = 16;
 // Where the pins have fully handed off to the bubbles. Short band on purpose:
 // the two looks sit at the same anchor, so a long overlap reads as clutter.
 // Exported for the same reason as ZOOM_CIRCLE, at the other end: the pin layer's
 // `maxzoom` matches it, because above this the pins are at opacity 0.
-export const ZOOM_BUBBLE_FULL = 16.9;
+export const ZOOM_BUBBLE_FULL = 16.4;
 
 const ICON_URL = "/tmap-icon.svg";
 // The artwork is padded inside its 186×186 viewBox; this is the pin's tight
@@ -231,6 +235,26 @@ const iconSizeExpr = (): ExpressionSpecification => [
 // resting field; 0 is pre-ripple (opacity and radius both 0). The Layer must
 // mount at 0 — react-map-gl adds it before `onLoad`, so SETTLED would flash
 // every dock for a frame before start() can tick the clock.
+// Extra pick radius around a dot, CSS px. Dots are ~2.5px at zoom 10 and ~6px
+// by 15, so this roughly triples the target at city scale.
+const HIT_PAD_PX = 6;
+
+// Paint for DOCKS_HIT_LAYER: the dot's settled radius plus a pad, drawn at
+// opacity 0. queryRenderedFeatures tests geometry, not opacity, so a fully
+// transparent circle is still a hit target. Static — no `time`, never updated.
+export function stationHitPaint(): CircleLayerSpecification["paint"] {
+  const r: ExpressionSpecification = ["coalesce", ["feature-state", "r"], 2.5];
+  return {
+    "circle-opacity": 0,
+    "circle-stroke-width": 0,
+    "circle-radius": [
+      "interpolate", ["linear"], ["zoom"],
+      10, ["+", r, HIT_PAD_PX],
+      15, ["+", ["*", r, 2.4], HIT_PAD_PX],
+    ],
+  };
+}
+
 export function stationPaint(
   time: number = SETTLED,
 ): CircleLayerSpecification["paint"] {
@@ -434,6 +458,7 @@ export class DockController {
         ? ["!=", ["get", "station_id"], id]
         : ["==", ["get", "station_id"], NO_DOCK];
     this.setFilterIfChanged(DOCKS_LAYER, filter);
+    this.setFilterIfChanged(DOCKS_HIT_LAYER, filter);
     this.setFilterIfChanged(DOCKS_ICON_LAYER, filter);
   }
 
