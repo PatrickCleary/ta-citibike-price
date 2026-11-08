@@ -37,10 +37,10 @@ const COPY: Partial<Record<Phase, ReactNode>> = {
 };
 
 // The reflect step grounds the shed in places: the farthest landmarks it reaches
-// and the nearest it misses (landmarkReach). Both come from data that's already
-// loaded for the map — the pick's walkshed and its routes file (for the origin)
-// — so there's nothing extra to fetch. Until they're in, or when a pick has no
-// shed, the sentence is simply left out.
+// and the nearest it misses (landmarkReach), as two short lists. Both come from
+// data that's already loaded for the map — the pick's walkshed and its routes
+// file (for the origin) — so there's nothing extra to fetch. Until they're in,
+// or when a pick has no shed, a plain sentence stands in.
 function ReflectCopy() {
   const selected = useApp((s) => s.selected);
   const walkshed = useWalkshed(selected?.id ?? null);
@@ -53,29 +53,40 @@ function ReflectCopy() {
   );
   const can = reach?.reachable ?? [];
   const cant = reach?.unreachable ?? [];
+  // Two lists: where the ride gets you, then what it just misses.
   return (
     <>
-      <p>This is how far a $3 ride on a Citi Bike can take you currently.</p>
-      {(can.length > 0 || cant.length > 0) && (
-        <p>
-          {can.length > 0 && cant.length > 0 ? (
-            <>
-              You can get to <Places list={can} />, but not{" "}
-              <Places list={cant} join="or" />.
-            </>
-          ) : can.length > 0 ? (
-            <>
-              You can get to <Places list={can} />.
-            </>
-          ) : (
-            <>
-              You can’t even get to <Places list={cant} join="or" />.
-            </>
-          )}
-        </p>
+      {!reach ? (
+        <p>This is how far $3 on an electric Citi Bike takes you right now.</p>
+      ) : can.length > 0 ? (
+        <>
+          <p>For $3 on an electric Citi Bike you can currently get to:</p>
+          <PlaceList list={can} />
+        </>
+      ) : (
+        <p>For $3 on an electric Citi Bike you can’t get far at all.</p>
       )}
-      
+      {cant.length > 0 && (
+        <>
+          <p>{can.length > 0 ? "But you can’t quite reach…" : "You can’t quite reach…"}</p>
+          <PlaceList list={cant} />
+        </>
+      )}
     </>
+  );
+}
+
+// Places stacked one per line, tucked up under the sentence that introduces
+// them (the card spaces its children by gap-3).
+function PlaceList({ list }: { list: Landmark[] }) {
+  return (
+    <ul className="-mt-1.5 flex flex-col items-center gap-0.5">
+      {list.map((l) => (
+        <li key={l.id}>
+          <Place l={l} />
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -97,7 +108,6 @@ function CompareCopy() {
   );
   return (
     <>
-      <p>This is how far you could ride.</p>
       {iconic.length > 0 && (
         <p>
           Now you can get to <Places list={iconic} />.
