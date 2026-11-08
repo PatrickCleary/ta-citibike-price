@@ -14,3 +14,11 @@ export const ORIGIN_ZOOM = 16;
 
 // Duration of both the selection ease-in and a replay's rewind to the origin.
 export const ORIGIN_EASE_MS = 2000;
+
+// Outline of Citi Bike's service area (public/data/coverage.geojson, built by
+// scripts/build-coverage.mjs): a quiet dashed edge, so the basemap outside it
+// stays readable but it's clear where the system stops.
+export const COVERAGE_URL = "/data/coverage.geojson";
+export const COVERAGE_LINE_COLOR = "#8a8a8a";
+export const COVERAGE_LINE_WIDTH = 1.25;
+export const COVERAGE_LINE_DASH = [3, 2];

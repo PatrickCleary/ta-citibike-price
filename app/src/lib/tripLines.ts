@@ -35,8 +35,16 @@ const TRIP_ALL = "trip-all";
 const HEAD_LAYER = "trip-heads";
 
 const TRAVEL_R = 3; // px — bead riding the head of a drawing line
-const DOCK_R = 3; // px — settled dot once docked
+const DOCK_R = 3; // px — dot once docked, while the step is still drawing
 const PLOP_MS = 450; // wall-clock duration of the dock plop
+// Once every trip in a step has docked (doneTimeOf), the docked dots ease down
+// to this fraction of DOCK_R and of their opacity over SETTLE_MS, so a finished
+// frame is a quiet field rather than a wall of full-strength dots. Fits inside
+// the run (endTimeOf trails doneTimeOf by ~0.8s wall), so a resting frame at
+// progress 1 is fully settled.
+const SETTLED_SCALE = 0.7;
+const SETTLED_ALPHA = 0.65;
+const SETTLE_MS = 600;
 const WHITE: [number, number, number] = [255, 255, 255];
 
 // Auto-fit breathing room, in px. The narrow mobile viewport can't spare much,
@@ -336,10 +344,20 @@ export class TripLines {
       }
     };
 
-    const build = (trips: Trip[], end: number, tier: TierState) => {
+    const build = (
+      trips: Trip[],
+      end: number,
+      done: number,
+      tier: TierState,
+    ) => {
       if (!tier.visible) return;
       const time = tier.progress * end;
       const alpha = Math.round(tier.opacity * 255);
+      // 0 while trips are still arriving → 1 once the whole step has settled.
+      const settleMs = ((time - done) / PLAYBACK_SPEEDUP) * 1000;
+      const settle = clamp01(settleMs / SETTLE_MS);
+      const dockScale = 1 + (SETTLED_SCALE - 1) * settle;
+      const dockAlpha = Math.round(alpha * (1 + (SETTLED_ALPHA - 1) * settle));
       for (const t of trips) {
         if (time < t.timestamps[0]) continue; // not departed (jitter window)
         const col = tier.color ?? t.color; // tier override, else baked per-trip
@@ -357,12 +375,12 @@ export class TripLines {
           line = [...col, alpha];
         } else {
           const plopMs = ((time - arrival) / PLAYBACK_SPEEDUP) * 1000;
-          radius = DOCK_R * overshoot(Math.min(plopMs / PLOP_MS, 1));
+          radius = DOCK_R * overshoot(Math.min(plopMs / PLOP_MS, 1)) * dockScale;
           pos = t.path[t.path.length - 1];
           includePoint(pos);
 
-          fill = [...col, alpha];
-          line = [...WHITE, alpha];
+          fill = [...col, dockAlpha];
+          line = [...WHITE, dockAlpha];
         }
         heads.push({ position: pos, radius, fill, line });
       }
@@ -370,8 +388,8 @@ export class TripLines {
 
     // All first, near last: when both tiers show (the far step's toggle), the
     // ≤11 docks sit on top of the ≤45 superset instead of being buried under it.
-    build(this.allTrips, this.allEnd, all);
-    build(this.nearTrips, this.nearEnd, near);
+    build(this.allTrips, this.allEnd, this.allDone, all);
+    build(this.nearTrips, this.nearEnd, this.nearDone, near);
 
     // Frame the accumulated point extent — but only while a draw-out tween owns
     // the camera (beginAutoFit)

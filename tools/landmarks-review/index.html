@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Landmark Review</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root {
+    --bg: #f6f5f1; --panel: #ffffff; --fg: #1c1c1a; --muted: #6b6a64; --line: #e3e1da;
+    --accent: #1f5fbf; --kept: #1c1c1a; --dropped: #b9b7ae;
+    --manhattan: #d64545; --bronx: #e08a1e; --brooklyn: #2e8b57; --queens: #7a4fd1; --si: #8a7a5a;
+  }
+  html, body { height: 100%; margin: 0; }
+  body { font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; background: var(--bg); color: var(--fg); display: flex; }
+  #side { width: 360px; flex: 0 0 360px; display: flex; flex-direction: column; background: var(--panel); border-right: 1px solid var(--line); min-width: 0; }
+  #map { flex: 1; min-width: 0; }
+  header { padding: 14px 16px 10px; border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 16px; margin: 0 0 2px; }
+  header .count { color: var(--muted); font-variant-numeric: tabular-nums; }
+  header .count b { color: var(--fg); }
+  .controls { padding: 10px 16px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  input[type=search] { width: 100%; box-sizing: border-box; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+  .chip { border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 3px 9px; font-size: 12px; cursor: pointer; color: var(--muted); }
+  .chip.on { color: var(--fg); border-color: var(--fg); }
+  .chip .sw { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+  .hint { color: var(--muted); font-size: 12px; }
+  #list { flex: 1; overflow-y: auto; }
+  .group { padding: 8px 0 4px; }
+  .group h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0; padding: 6px 16px; display: flex; justify-content: space-between; font-variant-numeric: tabular-nums; }
+  .group h2 .sw { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: -1px; }
+  .item { display: grid; grid-template-columns: 18px 1fr auto; gap: 8px; align-items: center; padding: 5px 16px; cursor: pointer; }
+  .item:hover, .item.active { background: #f1f0ea; }
+  .item .label { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .emoji { padding: 0 3px; font-size: 15px; line-height: 20px; border-radius: 4px; border-color: transparent; background: transparent; }
+  .emoji:hover { border-color: var(--line); background: #f1f0ea; }
+  .emoji.custom { border-color: var(--accent); }
+  .emoji.empty { color: var(--dropped); }
+  input.emoji-input { font: inherit; font-size: 15px; width: 3.2em; padding: 0 4px; border: 1px solid var(--accent); border-radius: 4px; }
+  .item .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item.dropped .name { color: var(--dropped); text-decoration: line-through; }
+  .item.moved .name::after { content: " ·moved"; color: var(--accent); font-size: 11px; }
+  .item.renamed .name::before { content: "✎ "; color: var(--accent); font-size: 11px; }
+  input.rename { font: inherit; padding: 1px 4px; border: 1px solid var(--accent); border-radius: 4px; min-width: 0; width: 100%; box-sizing: border-box; }
+  .actions { display: flex; align-items: center; gap: 6px; }
+  .edit { padding: 0 5px; font-size: 12px; line-height: 18px; border-radius: 4px; color: var(--muted); }
+  .edit:hover { color: var(--accent); border-color: var(--accent); }
+  .tier { font-size: 10px; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; font-variant-numeric: tabular-nums; }
+  footer { padding: 10px 16px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
+  button { font: inherit; font-size: 13px; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); cursor: pointer; }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  #toast { color: var(--muted); font-size: 12px; min-height: 1.2em; }
+  /* pins */
+  .pin { width: 12px; height: 12px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.25); box-sizing: border-box; }
+  .pin.t1 { width: 16px; height: 16px; }
+  .pin.t3 { width: 10px; height: 10px; }
+  .pin.dropped { opacity: .3; }
+  .pin.active { box-shadow: 0 0 0 3px var(--accent); }
+  .leaflet-tooltip.lbl { background: rgba(255,255,255,.9); border: 1px solid var(--line); font-size: 11px; padding: 1px 5px; box-shadow: none; }
+  .leaflet-tooltip.lbl.dropped { color: var(--dropped); text-decoration: line-through; }
+  .popup b { display: block; margin-bottom: 2px; }
+  .popup .meta { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+  @media (max-width: 760px) { body { flex-direction: column; } #side { width: auto; flex: 0 0 45%; border-right: 0; border-bottom: 1px solid var(--line); } }
+</style>
+</head>
+<body>
+<aside id="side">
+  <header>
+    <h1>Landmark Review</h1>
+    <div class="count"><b id="keptCount">0</b> kept · <span id="totalCount">0</span> candidates</div>
+  </header>
+  <div class="controls">
+    <input id="q" type="search" placeholder="Filter by name…">
+    <div class="row" id="boroughChips"></div>
+    <div class="row">
+      <span class="hint">Show tier</span>
+      <button class="chip on" data-tier="1">1 iconic</button>
+      <button class="chip on" data-tier="2">2 well known</button>
+      <button class="chip on" data-tier="3">3 local anchor</button>
+    </div>
+    <div class="row"><button class="chip on" id="stationsToggle"><span class="sw" style="background:var(--accent)"></span>Citi Bike stations</button><span class="hint" id="stationsCount"></span></div>
+    <div class="hint">Click a row to zoom. Checkbox = keep. Click the emoji to change it, ✎ to rename. Drag a pin to move it. Everything saves in this browser.</div>
+  </div>
+  <div id="list"></div>
+  <footer>
+    <div class="row">
+      <button class="primary" id="copyKept">Copy kept as JSON</button>
+      <button id="copySummary">Copy kept / dropped names</button>
+    </div>
+    <div class="row">
+      <button id="keepVisible">Keep all visible</button>
+      <button id="dropVisible">Drop all visible</button>
+      <button id="reset">Reset</button>
+    </div>
+    <div id="toast"></div>
+  </footer>
+</aside>
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="landmarks.js"></script>
+<script src="stations.js"></script>
+<script>
+(function () {
+  const DATA = window.LANDMARKS;
+  const COLORS = { Manhattan: "var(--manhattan)", Bronx: "var(--bronx)", Brooklyn: "var(--brooklyn)", Queens: "var(--queens)", "Staten Island": "var(--si)" };
+  const BOROUGHS = [...new Set(DATA.map(d => d.borough))];
+  const KEY = "landmark-review-v2";
+
+  // ---- state (persisted) ----
+  let state = { kept: {}, pos: {}, names: {}, emojis: {} };
+  try { state = Object.assign(state, JSON.parse(localStorage.getItem(KEY) || "{}")); state.names = state.names || {}; state.emojis = state.emojis || {}; } catch (e) {}
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} };
+  const isKept = d => state.kept[d.id] !== undefined ? state.kept[d.id] : true;
+  const posOf = d => state.pos[d.id] || { lat: d.lat, lng: d.lng };
+  const nameOf = d => state.names[d.id] || d.name;
+  const emojiOf = d => state.emojis[d.id] !== undefined ? state.emojis[d.id] : d.emoji;
+
+  const filt = { q: "", boroughs: new Set(BOROUGHS), tiers: new Set([1, 2, 3]) };
+  const visible = d => filt.boroughs.has(d.borough) && filt.tiers.has(d.tier) && nameOf(d).toLowerCase().includes(filt.q);
+  let activeId = null;
+
+  // ---- map ----
+  const map = L.map("map", { zoomControl: true }).setView([40.72, -73.95], 11);
+  // Stadia Alidade Smooth, same basemap as the app. Keyless on localhost, so serve this folder (e.g. python3 -m http.server) rather than opening the file directly.
+  L.tileLayer("https://tiles.stadiamaps.com/tiles/alidade_smooth/{z}/{x}/{y}{r}.png", {
+    attribution: '&copy; <a href="https://stadiamaps.com/">Stadia Maps</a> &copy; <a href="https://openmaptiles.org/">OpenMapTiles</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>', maxZoom: 20,
+  }).addTo(map);
+
+  // Citi Bike service area: every station as a faint dot on a canvas renderer.
+  const stationLayer = L.layerGroup();
+  const canvas = L.canvas({ padding: 0.5 });
+  (window.STATIONS || []).forEach(([lat, lng]) => L.circleMarker([lat, lng], { renderer: canvas, radius: 2, stroke: false, fillColor: "#1f5fbf", fillOpacity: 0.35, interactive: false }).addTo(stationLayer));
+  stationLayer.addTo(map);
+  document.getElementById("stationsCount").textContent = `${(window.STATIONS || []).length} stations`;
+  document.getElementById("stationsToggle").addEventListener("click", e => {
+    map.hasLayer(stationLayer) ? map.removeLayer(stationLayer) : stationLayer.addTo(map); e.currentTarget.classList.toggle("on");
+  });
+
+  const markers = {};
+  function iconFor(d) {
+    const cls = `pin t${d.tier}${isKept(d) ? "" : " dropped"}${d.id === activeId ? " active" : ""}`;
+    const s = d.tier === 1 ? 16 : d.tier === 3 ? 10 : 12;
+    return L.divIcon({ className: "", html: `<div class="${cls}" style="background:${COLORS[d.borough]}"></div>`, iconSize: [s, s], iconAnchor: [s / 2, s / 2] });
+  }
+  function popupHtml(d) {
+    const p = posOf(d);
+    return `<div class="popup"><b>${emojiOf(d)} ${nameOf(d)}</b><div class="meta">${d.borough} · tier ${d.tier} · ${p.lat.toFixed(4)}, ${p.lng.toFixed(4)}</div>
+      <button data-toggle="${d.id}">${isKept(d) ? "Drop" : "Keep"}</button>${state.pos[d.id] ? ` <button data-reset-pos="${d.id}">Reset position</button>` : ""}</div>`;
+  }
+  DATA.forEach(d => {
+    const m = L.marker(posOf(d), { icon: iconFor(d), draggable: true, title: nameOf(d) });
+    m.bindTooltip(`${emojiOf(d)} ${nameOf(d)}`.trim(), { className: "lbl" + (isKept(d) ? "" : " dropped"), direction: "right", offset: [8, 0] });
+    m.bindPopup(() => popupHtml(d));
+    m.on("click", () => setActive(d.id, false));
+    m.on("dragend", () => { const ll = m.getLatLng(); state.pos[d.id] = { lat: +ll.lat.toFixed(5), lng: +ll.lng.toFixed(5) }; save(); refresh(d); });
+    markers[d.id] = m;
+  });
+  map.on("popupopen", e => {
+    e.popup.getElement().querySelectorAll("button").forEach(b => b.addEventListener("click", () => {
+      const t = b.dataset.toggle, r = b.dataset.resetPos;
+      if (t) toggle(DATA.find(x => x.id === t));
+      if (r) { delete state.pos[r]; save(); const d = DATA.find(x => x.id === r); markers[r].setLatLng([d.lat, d.lng]); refresh(d); }
+      map.closePopup();
+    }));
+  });
+  map.on("zoomend", updateLabels);
+  function updateLabels() {
+    const z = map.getZoom();
+    DATA.forEach(d => { const tt = markers[d.id].getTooltip(); if (tt) tt.options.permanent = z >= 13 || (z >= 12 && d.tier === 1); markers[d.id].unbindTooltip().bindTooltip(`${emojiOf(d)} ${nameOf(d)}`.trim(), { className: "lbl" + (isKept(d) ? "" : " dropped"), direction: "right", offset: [8, 0], permanent: z >= 13 || (z >= 12 && d.tier === 1) }); });
+  }
+
+  // ---- list ----
+  const listEl = document.getElementById("list");
+  function renderList() {
+    listEl.innerHTML = "";
+    BOROUGHS.forEach(b => {
+      const items = DATA.filter(d => d.borough === b && visible(d));
+      if (!items.length) return;
+      const g = document.createElement("div"); g.className = "group";
+      const kept = DATA.filter(d => d.borough === b && isKept(d)).length;
+      g.innerHTML = `<h2><span><span class="sw" style="background:${COLORS[b]}"></span>${b}</span><span>${kept} kept</span></h2>`;
+      items.forEach(d => {
+        const el = document.createElement("div");
+        el.className = `item${isKept(d) ? "" : " dropped"}${state.pos[d.id] ? " moved" : ""}${state.names[d.id] ? " renamed" : ""}${d.id === activeId ? " active" : ""}`;
+        el.dataset.id = d.id;
+        el.innerHTML = `<input type="checkbox" ${isKept(d) ? "checked" : ""}><span class="label"><button class="emoji${state.emojis[d.id] ? " custom" : ""}${emojiOf(d) ? "" : " empty"}" title="Change emoji (empty = name only)">${emojiOf(d) || "·"}</button><span class="name">${nameOf(d)}</span></span><span class="actions"><button class="edit" title="Rename">✎</button><span class="tier">T${d.tier}</span></span>`;
+        el.querySelector("input").addEventListener("click", ev => { ev.stopPropagation(); toggle(d); });
+        el.querySelector(".emoji").addEventListener("click", ev => { ev.stopPropagation(); startEmoji(d, el); });
+        el.querySelector(".edit").addEventListener("click", ev => { ev.stopPropagation(); startRename(d, el); });
+        el.querySelector(".name").addEventListener("dblclick", ev => { ev.stopPropagation(); startRename(d, el); });
+        el.addEventListener("click", () => { setActive(d.id, true); });
+        g.appendChild(el);
+      });
+      listEl.appendChild(g);
+    });
+    document.getElementById("keptCount").textContent = DATA.filter(isKept).length;
+    document.getElementById("totalCount").textContent = DATA.length;
+  }
+  function startEmoji(d, row) {
+    const btn = row.querySelector(".emoji");
+    const input = document.createElement("input"); input.type = "text"; input.className = "emoji-input"; input.value = emojiOf(d); input.maxLength = 8;
+    btn.replaceWith(input); input.focus(); input.select();
+    let done = false;
+    const finish = (commit) => {
+      if (done) return; done = true;
+      const v = input.value.trim();
+      if (commit) { if (v !== d.emoji) state.emojis[d.id] = v; else delete state.emojis[d.id]; save(); }
+      refresh(d);
+    };
+    input.addEventListener("click", ev => ev.stopPropagation());
+    input.addEventListener("keydown", ev => { if (ev.key === "Enter") finish(true); if (ev.key === "Escape") finish(false); });
+    input.addEventListener("blur", () => finish(true));
+  }
+  function startRename(d, row) {
+    const span = row.querySelector(".name");
+    const input = document.createElement("input"); input.type = "text"; input.className = "rename"; input.value = nameOf(d);
+    span.replaceWith(input); input.focus(); input.select();
+    let done = false;
+    const finish = (commit) => {
+      if (done) return; done = true;
+      const v = input.value.trim();
+      if (commit) { if (v && v !== d.name) state.names[d.id] = v; else delete state.names[d.id]; save(); }
+      refresh(d);
+    };
+    input.addEventListener("click", ev => ev.stopPropagation());
+    input.addEventListener("keydown", ev => { if (ev.key === "Enter") finish(true); if (ev.key === "Escape") finish(false); });
+    input.addEventListener("blur", () => finish(true));
+  }
+  function refresh(d) { markers[d.id].setIcon(iconFor(d)); updateLabels(); renderList(); }
+  function toggle(d) { state.kept[d.id] = !isKept(d); save(); refresh(d); }
+  function setActive(id, fly) {
+    const prev = activeId; activeId = id;
+    if (prev) markers[prev].setIcon(iconFor(DATA.find(x => x.id === prev)));
+    const d = DATA.find(x => x.id === id);
+    markers[id].setIcon(iconFor(d));
+    if (fly) map.flyTo(markers[id].getLatLng(), Math.max(map.getZoom(), 14), { duration: 0.6 });
+    renderList();
+    const row = listEl.querySelector(`.item[data-id="${id}"]`); if (row) row.scrollIntoView({ block: "nearest" });
+  }
+
+  // ---- filters ----
+  const chips = document.getElementById("boroughChips");
+  BOROUGHS.forEach(b => {
+    const c = document.createElement("button"); c.className = "chip on"; c.innerHTML = `<span class="sw" style="background:${COLORS[b]}"></span>${b}`;
+    c.addEventListener("click", () => { filt.boroughs.has(b) ? filt.boroughs.delete(b) : filt.boroughs.add(b); c.classList.toggle("on"); applyFilter(); });
+    chips.appendChild(c);
+  });
+  document.querySelectorAll("[data-tier]").forEach(c => c.addEventListener("click", () => {
+    const t = +c.dataset.tier; filt.tiers.has(t) ? filt.tiers.delete(t) : filt.tiers.add(t); c.classList.toggle("on"); applyFilter();
+  }));
+  document.getElementById("q").addEventListener("input", e => { filt.q = e.target.value.trim().toLowerCase(); applyFilter(); });
+  function applyFilter() {
+    DATA.forEach(d => { visible(d) ? markers[d.id].addTo(map) : map.removeLayer(markers[d.id]); });
+    renderList();
+  }
+
+  // ---- export ----
+  const toast = msg => { const t = document.getElementById("toast"); t.textContent = msg; setTimeout(() => { if (t.textContent === msg) t.textContent = ""; }, 3000); };
+  function copy(text, msg) {
+    navigator.clipboard.writeText(text).then(() => toast(msg)).catch(() => { const ta = document.createElement("textarea"); ta.value = text; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); ta.remove(); toast(msg); });
+  }
+  document.getElementById("copyKept").addEventListener("click", () => {
+    const out = DATA.filter(isKept).map(d => ({ id: d.id, name: nameOf(d), emoji: emojiOf(d), borough: d.borough, tier: d.tier, ...posOf(d) }));
+    copy(JSON.stringify(out, null, 2), `Copied ${out.length} landmarks as JSON`);
+  });
+  document.getElementById("copySummary").addEventListener("click", () => {
+    const kept = DATA.filter(isKept), dropped = DATA.filter(d => !isKept(d)), moved = DATA.filter(d => state.pos[d.id]), renamed = DATA.filter(d => state.names[d.id]), reglyphed = DATA.filter(d => state.emojis[d.id]);
+    const txt = `KEPT (${kept.length}):\n${kept.map(d => `- ${nameOf(d)}`).join("\n")}\n\nDROPPED (${dropped.length}):\n${dropped.map(d => `- ${nameOf(d)}`).join("\n")}` +
+      (moved.length ? `\n\nMOVED (${moved.length}):\n${moved.map(d => `- ${nameOf(d)} -> ${posOf(d).lat}, ${posOf(d).lng}`).join("\n")}` : "") +
+      (renamed.length ? `\n\nRENAMED (${renamed.length}):\n${renamed.map(d => `- ${d.name} -> ${nameOf(d)}`).join("\n")}` : "") +
+      (reglyphed.length ? `\n\nEMOJI CHANGED (${reglyphed.length}):\n${reglyphed.map(d => `- ${nameOf(d)}: ${d.emoji} -> ${emojiOf(d)}`).join("\n")}` : "");
+    copy(txt, "Copied summary");
+  });
+  document.getElementById("keepVisible").addEventListener("click", () => { DATA.filter(visible).forEach(d => state.kept[d.id] = true); save(); DATA.forEach(d => markers[d.id].setIcon(iconFor(d))); updateLabels(); renderList(); });
+  document.getElementById("dropVisible").addEventListener("click", () => { DATA.filter(visible).forEach(d => state.kept[d.id] = false); save(); DATA.forEach(d => markers[d.id].setIcon(iconFor(d))); updateLabels(); renderList(); });
+  document.getElementById("reset").addEventListener("click", () => {
+    if (document.getElementById("reset").textContent !== "Really reset?") { document.getElementById("reset").textContent = "Really reset?"; setTimeout(() => document.getElementById("reset").textContent = "Reset", 2500); return; }
+    state = { kept: {}, pos: {}, names: {}, emojis: {} }; save(); DATA.forEach(d => { markers[d.id].setLatLng([d.lat, d.lng]); markers[d.id].setIcon(iconFor(d)); }); updateLabels(); renderList(); document.getElementById("reset").textContent = "Reset"; toast("Reset to defaults");
+  });
+
+  applyFilter();
+  updateLabels();
+})();
+</script>
+</body>
+</html>

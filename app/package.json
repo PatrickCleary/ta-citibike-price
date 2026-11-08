@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "astro dev",
     "build:data": "node scripts/build-data.mjs",
+    "build:coverage": "node scripts/build-coverage.mjs",
     "build": "node scripts/build-data.mjs && astro build",
     "preview": "astro preview",
     "astro": "astro"
@@ -32,6 +33,7 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@turf/turf": "^7.2.0",
     "@types/geojson": "^7946.0.15",
     "@types/mapbox__polyline": "^1.0.5",
     "@types/react": "^19.0.0",
