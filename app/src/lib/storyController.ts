@@ -13,7 +13,8 @@ import { DockController } from "./dockController";
 import { COLOR_ALL, TripLines, tiersForPhase } from "./tripLines";
 import type { WalkshedLayer } from "./walksheds";
 import { FAR_ONLY, PLAYBACK_SPEEDUP, type Layers, type StepKey } from "./store";
-import { FULL_VIEW, ORIGIN_EASE_MS, ORIGIN_ZOOM } from "./constants";
+import { FULL_VIEW } from "./constants";
+import { easeToOrigin } from "./mapControl";
 
 const EMPTY: Set<string> = new Set();
 
@@ -120,7 +121,8 @@ export class StoryController {
   // selection landed on, and only then play. onDone fires when the draw settles,
   // same as playNear/playFar.
   replay(key: StepKey, onDone?: () => void) {
-    if (!this.rewindToOrigin(key)) return;
+    const rewindMs = this.rewindToOrigin(key);
+    if (rewindMs == null) return;
     // Counts as playing from the start of the rewind, so a resting-frame repaint
     // of this same step (e.g. far's replay resetting the layer toggle) doesn't
     // stop() it and cancel the pending draw-out.
@@ -129,25 +131,20 @@ export class StoryController {
     this.rewind = setTimeout(() => {
       this.rewind = null;
       this.play(key, onDone);
-    }, ORIGIN_EASE_MS);
+    }, rewindMs);
   }
 
   // Clear the drawn lines and ease back to the origin view, without playing
-  // anything. Returns false if there's no pick to rewind to. Standalone, this is
-  // the "start the story over" frame (the final step's Replay); `replay` chains
-  // a draw-out onto it.
-  rewindToOrigin(key: StepKey = "near"): boolean {
+  // anything. Returns the ease's duration, or null if there's no pick to rewind
+  // to. Standalone, this is the "start the story over" frame (the final step's
+  // Replay); `replay` chains a draw-out onto it.
+  rewindToOrigin(key: StepKey = "near"): number | null {
     this.stop();
-    if (!this.hasOrigin()) return false;
+    if (!this.hasOrigin()) return null;
     const origin = this.originFor(this.selectedId()!)!;
     this.renderStep(key, 0, { hideTrips: true });
     this.map.stop();
-    this.map.easeTo({
-      center: origin,
-      zoom: ORIGIN_ZOOM,
-      duration: ORIGIN_EASE_MS,
-    });
-    return true;
+    return easeToOrigin(this.map, origin);
   }
 
   stop() {

@@ -14,7 +14,6 @@ import {
 import { FAR_ONLY, useApp, type Layers, type StepKey } from "../lib/store";
 import { useMapStore, useSetMapInteractive } from "../lib/mapStore";
 import { useResetMap } from "../lib/mapControl";
-import { ORIGIN_EASE_MS } from "../lib/constants";
 import { useRoutes } from "../lib/queries";
 import NarrationBlock from "./NarrationBlock";
 import StoryCopy from "./StoryCopy";
@@ -258,7 +257,10 @@ export default function Narrator() {
     // Only a fresh pick flies the camera; a far-step switch stays put.
     if (!selected || useApp.getState().phase !== "selected") return;
     setBusy(true);
-    const id = setTimeout(() => setBusy(false), ORIGIN_EASE_MS);
+    const id = setTimeout(
+      () => setBusy(false),
+      useMapStore.getState().originEaseMs,
+    );
     return () => clearTimeout(id);
   }, [selected?.id]);
 

@@ -12,8 +12,17 @@ export const FULL_VIEW = {
 // lands, and where a replay rewinds to before drawing a step out again.
 export const ORIGIN_ZOOM = 16;
 
-// Duration of both the selection ease-in and a replay's rewind to the origin.
-export const ORIGIN_EASE_MS = 2000;
+// Timing of the ease onto a picked origin (the selection, and a replay's rewind).
+// The duration scales with how far the camera has to travel, a roughly constant
+// speed with easing on top, so a hop to the next dock over is quick and the
+// long dive in from the metro view takes its time. See easeToOrigin.
+export const ORIGIN_EASE = {
+  baseMs: 300, // floor cost of any move, so even a tiny hop still eases
+  msPerViewport: 600, // per screen-width of pan, measured at the starting zoom
+  msPerZoom: 250, // per zoom level gained or lost
+  minMs: 400,
+  maxMs: 2000,
+};
 
 // Outline of Citi Bike's service area (public/data/coverage.geojson, built by
 // scripts/build-coverage.mjs): a quiet dashed edge, so the basemap outside it
