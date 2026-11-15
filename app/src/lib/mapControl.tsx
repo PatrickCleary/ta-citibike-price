@@ -1,15 +1,17 @@
 import { useApp } from "./store";
 import { useMapStore, useSetMapInteractive } from "./mapStore";
 import type { StationPoint } from "./dockController";
-import { FULL_VIEW, ORIGIN_EASE, ORIGIN_ZOOM } from "./constants";
+import { FULL_VIEW, ORIGIN_EASE, ORIGIN_ZOOM, PICK_OFFSET } from "./constants";
 
 // Ease the camera onto an origin at ORIGIN_ZOOM, taking longer the further it
 // has to go. Distance is measured in screen space at the starting zoom (that's
 // how far the view visibly slides) plus the zoom change. Returns the duration
-// so callers can wait out the move.
+// so callers can wait out the move. `offsetY` lands the origin that many pixels
+// below the middle of the screen instead of on it.
 export const easeToOrigin = (
   map: maplibregl.Map,
   center: [number, number],
+  offsetY = 0,
 ): number => {
   const container = map.getContainer();
   const from = map.project(map.getCenter());
@@ -25,7 +27,7 @@ export const easeToOrigin = (
       Math.max(minMs, baseMs + viewports * msPerViewport + zoomSteps * msPerZoom),
     ),
   );
-  map.easeTo({ center, zoom: ORIGIN_ZOOM, duration });
+  map.easeTo({ center, zoom: ORIGIN_ZOOM, duration, offset: [0, offsetY] });
   return duration;
 };
 
@@ -38,8 +40,13 @@ export const useSelectStation = () => {
   return (station: StationPoint) => {
     const { map, docks, setOriginEaseMs } = useMapStore.getState();
     // Start the camera before publishing the pick, so the Narrator's control
-    // gate (keyed on the selection) reads this ease's duration.
-    if (map) setOriginEaseMs(easeToOrigin(map, [station.lon, station.lat]));
+    // gate (keyed on the selection) reads this ease's duration. The dock lands
+    // below centre, clear of the question PickedHeader puts over the top of
+    // the screen.
+    if (map) {
+      const offsetY = Math.round(map.getContainer().clientHeight * PICK_OFFSET);
+      setOriginEaseMs(easeToOrigin(map, [station.lon, station.lat], offsetY));
+    }
 
     setSelected({ id: station.id, name: station.name });
 

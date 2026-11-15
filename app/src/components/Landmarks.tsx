@@ -11,6 +11,11 @@
 // frame shows as many as fit, iconic ones first, and the rest arrive as the
 // camera closes in.
 //
+// When the story's copy names landmarks (useHighlight: the reflect step's "you
+// can get to A, but not B"), those are placed first so they always win their
+// space, drawn emphasised (a ring in the near orange for reachable, grey and
+// struck through for out of reach), and every other label dims back.
+//
 // Same DOM-marker pattern as StationBubble: Marker keeps each element positioned
 // as the camera moves, and only a change to the SET in view re-renders. A
 // landmark mounts when it enters the viewport (or wins its space back), so as
@@ -21,7 +26,8 @@ import { createPortal } from "react-dom";
 import maplibregl from "maplibre-gl";
 import { LANDMARKS, type Landmark } from "../data/landmarks";
 import { useMapStore } from "../lib/mapStore";
-import { useApp } from "../lib/store";
+import { useApp, useHighlight } from "../lib/store";
+import { COLOR_NEAR } from "../lib/tripLines";
 
 // Tier never hides a landmark on its own — every one shows wherever there is
 // room. Tier only decides who wins when two labels would overlap: tier 1 first.
@@ -70,6 +76,9 @@ export default function Landmarks() {
   );
   const playing = useDrawOutPlaying();
   const placed = useVisibleLandmarks(early || playing ? null : map);
+  const reachable = useHighlight((s) => s.reachable);
+  const unreachable = useHighlight((s) => s.unreachable);
+  const anyMarked = reachable.length + unreachable.length > 0;
 
   const byId = useMemo(
     () => new globalThis.Map(LANDMARKS.map((l) => [l.id, l])),
@@ -87,6 +96,15 @@ export default function Landmarks() {
             map={map}
             landmark={landmark}
             compact={compact}
+            mark={
+              reachable.includes(id)
+                ? "can"
+                : unreachable.includes(id)
+                  ? "cant"
+                  : anyMarked
+                    ? "dim"
+                    : null
+            }
           />
         ) : null;
       })}
@@ -142,10 +160,14 @@ function useVisibleLandmarks(map: maplibregl.Map | null): Placed[] {
       const next: Placed[] = [];
       const bounds = map.getBounds();
       const taken: Box[] = [];
-      // Incumbents first (by tier among themselves), then newcomers by tier.
+      // Landmarks the copy names first, then incumbents (by tier among
+      // themselves), then newcomers by tier.
+      const { reachable, unreachable } = useHighlight.getState();
+      const named = new Set([...reachable, ...unreachable]);
       const order = [
-        ...BY_PRIORITY.filter((l) => prev.has(l.id)),
-        ...BY_PRIORITY.filter((l) => !prev.has(l.id)),
+        ...BY_PRIORITY.filter((l) => named.has(l.id)),
+        ...BY_PRIORITY.filter((l) => !named.has(l.id) && prev.has(l.id)),
+        ...BY_PRIORITY.filter((l) => !named.has(l.id) && !prev.has(l.id)),
       ];
       for (const l of order) {
         if (!bounds.contains([l.lon, l.lat])) continue;
@@ -164,7 +186,9 @@ function useVisibleLandmarks(map: maplibregl.Map | null): Placed[] {
         if (!taken.some((b) => overlaps(wantBox, b))) {
           taken.push(fullBox);
           next.push({ id: l.id, compact: false });
-        } else if (!taken.some((b) => overlaps(iconBox, b))) {
+        } else if (named.has(l.id) || !taken.some((b) => overlaps(iconBox, b))) {
+          // A landmark the copy names never hides: at worst it keeps its icon,
+          // overlapping or not.
           taken.push(iconBox);
           next.push({ id: l.id, compact: true });
         }
@@ -183,7 +207,10 @@ function useVisibleLandmarks(map: maplibregl.Map | null): Placed[] {
     recompute();
     map.on("move", schedule);
     map.on("zoom", schedule);
+    // A change in what the copy names re-solves the layout.
+    const unsubscribe = useHighlight.subscribe(schedule);
     return () => {
+      unsubscribe();
       map.off("move", schedule);
       map.off("zoom", schedule);
       if (raf != null) cancelAnimationFrame(raf);
@@ -193,14 +220,20 @@ function useVisibleLandmarks(map: maplibregl.Map | null): Placed[] {
   return placed;
 }
 
+const NEAR_RGB = `rgb(${COLOR_NEAR.join(",")})`;
+
 function LandmarkMarker({
   map,
   landmark,
   compact,
+  mark,
 }: {
   map: maplibregl.Map;
   landmark: Landmark;
   compact: boolean;
+  /** Named by the copy as reachable ("can") or not ("cant"); "dim" while the
+   *  copy names others. */
+  mark: "can" | "cant" | "dim" | null;
 }) {
   const el = useMemo(() => document.createElement("div"), []);
 
@@ -219,12 +252,16 @@ function LandmarkMarker({
     };
   }, [map, el, landmark.lon, landmark.lat]);
 
-  // Under the station bubbles (zIndex 0/1): the story's own labels win.
-  el.style.zIndex = "0";
+  // Under the station bubbles (zIndex 0/1): the story's own labels win. Named
+  // landmarks rise over the rest.
+  el.style.zIndex = mark === "can" || mark === "cant" ? "1" : "0";
+  const named = mark === "can" || mark === "cant";
 
   return createPortal(
     <div
-      className="pointer-events-none flex items-center"
+      className={`pointer-events-none flex items-center transition-opacity duration-500 ${
+        mark === "dim" ? "opacity-40" : ""
+      }`}
       style={{
         gap: GAP,
         // One shadow for the whole pill: a filter follows the combined
@@ -239,8 +276,16 @@ function LandmarkMarker({
           landmark. Opaque, and layered over the name segment's start so the
           two read as one pill. */}
       <span
-        className="relative z-10 flex shrink-0 items-center justify-center rounded-full bg-white text-sm leading-none"
-        style={{ width: ICON_W, height: ICON_W }}
+        className={`relative z-10 flex shrink-0 items-center justify-center rounded-full bg-white text-sm leading-none transition-[box-shadow] duration-500 ${
+          mark === "cant" ? "grayscale" : ""
+        }`}
+        style={{
+          width: ICON_W,
+          height: ICON_W,
+          boxShadow: named
+            ? `0 0 0 2px ${mark === "can" ? NEAR_RGB : "rgb(156,163,175)"}`
+            : undefined,
+        }}
         aria-hidden="true"
       >
         {landmark.emoji || (
@@ -255,7 +300,13 @@ function LandmarkMarker({
           by half its width so the pill has no seam. */}
       {!compact && (
         <span
-          className="flex items-center rounded-r-full bg-white/60 pr-2 text-[11px] leading-none font-normal whitespace-nowrap text-neutral-500"
+          className={`flex items-center rounded-r-full pr-2 text-[11px] leading-none whitespace-nowrap transition-colors duration-500 ${
+            mark === "can"
+              ? "bg-white font-semibold text-neutral-900"
+              : mark === "cant"
+                ? "bg-white font-medium text-neutral-500 line-through decoration-neutral-400"
+                : "bg-white/60 font-normal text-neutral-500"
+          }`}
           style={{
             height: PILL_H,
             marginLeft: -ICON_W / 2,

@@ -50,6 +50,15 @@ export const TIERS: Record<StepKey, { tier: 11 | 45; color: string; fill: number
 };
 const LINE_OPACITY = 0.9;
 
+// How strongly a tier's shed shows. "ghost" is the near shed kept on, faded,
+// under the far draw-out: the outline and shading of where $3 gets you today,
+// for the subsidized ride to grow out past.
+export type ShedLevel = "off" | "ghost" | "on";
+// Strong enough to read on top of the ≤45 shed's fill once that fades in
+// beneath it (the near layers stack above the far ones), but still clearly
+// quieter than the near step's own full shed.
+const GHOST = { fill: 0.55, line: 0.85 }; // fractions of the full opacities
+
 const fillId = (key: StepKey) => `walkshed-${key}-fill`;
 const lineId = (key: StepKey) => `walkshed-${key}-line`;
 
@@ -110,14 +119,23 @@ export class WalkshedLayer {
 
   // Fade each tier's shed in or out independently (near draws over far).
   showTiers(on: Record<StepKey, boolean>) {
-    const tag = `${on.near}/${on.far}`;
+    this.showLevels({
+      near: on.near ? "on" : "off",
+      far: on.far ? "on" : "off",
+    });
+  }
+
+  // Set each tier's level (see ShedLevel), fading between them. Idempotent.
+  showLevels(levels: Record<StepKey, ShedLevel>) {
+    const tag = `${levels.near}/${levels.far}`;
     if (tag === this.shown) return;
     this.shown = tag;
     for (const k of ["near", "far"] as StepKey[]) {
-      if (this.map.getLayer(fillId(k))) {
-        this.map.setPaintProperty(fillId(k), "fill-opacity", on[k] ? TIERS[k].fill : 0);
-        this.map.setPaintProperty(lineId(k), "line-opacity", on[k] ? LINE_OPACITY : 0);
-      }
+      if (!this.map.getLayer(fillId(k))) continue;
+      const level = levels[k];
+      const scale = { off: { fill: 0, line: 0 }, ghost: GHOST, on: { fill: 1, line: 1 } }[level];
+      this.map.setPaintProperty(fillId(k), "fill-opacity", TIERS[k].fill * scale.fill);
+      this.map.setPaintProperty(lineId(k), "line-opacity", LINE_OPACITY * scale.line);
     }
   }
 

@@ -14,10 +14,10 @@ export interface Dock {
   name: string;
 }
 
-// The story is eight discrete, independently re-enterable steps (plus `intro`,
+// The story is six discrete, independently re-enterable steps (plus `intro`,
 // the pre-selection state). Each step owns a static resting frame; the two
 // draw-out steps (`near`, `far`) also have an animation the UI's play button
-// triggers — from `selected` and `capped` respectively, the steps that pose the
+// triggers — from `selected` and `reflect` respectively, the steps that pose the
 // question before each draw-out. There is no scrubbing — you only ever play a step forward or land
 // on its resting frame (e.g. via reset-to-any-step).
 export type Phase =
@@ -25,8 +25,6 @@ export type Phase =
   | "selected"
   | "near"
   | "reflect"
-  | "subsidy"
-  | "capped"
   | "far"
   | "compare"
   | "final";
@@ -53,8 +51,6 @@ export const STEP_ORDER = [
   "selected",
   "near",
   "reflect",
-  "subsidy",
-  "capped",
   "far",
   "compare",
   "final",
@@ -81,7 +77,7 @@ interface AppState {
   exploring: boolean;
   setExploring: (on: boolean) => void;
   /** Draw-outs played through at least once for this pick. The step that
-   *  poses a draw-out (`selected`, `capped`) can't be skipped with Next until
+   *  poses a draw-out (`selected`, `reflect`) can't be skipped with Next until
    *  its animation has been watched. */
   watched: Record<StepKey, boolean>;
   markWatched: (k: StepKey) => void;
@@ -102,6 +98,22 @@ interface HoverState {
 export const useHover = create<HoverState>((set) => ({
   hoveredId: null,
   setHovered: (hoveredId) => set({ hoveredId }),
+}));
+
+// Landmarks the story's copy is naming right now (the reflect step's "you can
+// get to A and B, but not C"), so the map can pick them out to match. Not part
+// of AppState for the same reason as hover: it's a reading aid, not a step.
+interface HighlightState {
+  /** Named as reachable / as just out of reach, by landmark id. */
+  reachable: string[];
+  unreachable: string[];
+  setHighlight: (reachable: string[], unreachable: string[]) => void;
+}
+
+export const useHighlight = create<HighlightState>((set) => ({
+  reachable: [],
+  unreachable: [],
+  setHighlight: (reachable, unreachable) => set({ reachable, unreachable }),
 }));
 
 export const useApp = create<AppState>((set) => ({

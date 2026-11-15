@@ -12,6 +12,11 @@ export const FULL_VIEW = {
 // lands, and where a replay rewinds to before drawing a step out again.
 export const ORIGIN_ZOOM = 16;
 
+// Where a fresh pick's dock lands, as a fraction of the screen height below
+// centre: low enough to clear PickedHeader's question and Play button above it.
+// (A replay's rewind has no header to clear, so it centres the dock.)
+export const PICK_OFFSET = 0.2;
+
 // Timing of the ease onto a picked origin (the selection, and a replay's rewind).
 // The duration scales with how far the camera has to travel, a roughly constant
 // speed with easing on top, so a hop to the next dock over is quick and the

@@ -39,7 +39,8 @@ import {
   COVERAGE_URL,
   FULL_VIEW,
 } from "../lib/constants";
-import Narrator, { StepLegend } from "./Narrator";
+import Narrator from "./Narrator";
+import { StepLegend } from "./Legend";
 import { SearchBar } from "./SearchBar";
 import { useIsMobile } from "../lib/useIsMobile";
 import { AnimatePresence, motion } from "motion/react";
@@ -72,7 +73,11 @@ const transformRequest: maplibregl.RequestTransformFunction = (url) => {
 // One react-query client for the whole island.
 const queryClient = new QueryClient();
 
-type StationProperties = { station_id: string; name: string };
+type StationProperties = {
+  station_id: string;
+  name: string;
+  borough?: string; // added by scripts/build-data.mjs
+};
 
 export default function MapComponent({
   serverData,
@@ -121,6 +126,20 @@ function MapView({
   const stationsByName = useMemo(
     () => new Map(features.map((f) => [f.name, f])),
     [features],
+  );
+  const boroughs = useMemo(
+    () =>
+      new Map(
+        serverData.features.map((f) => [
+          f.properties.station_id,
+          f.properties.borough ?? null,
+        ]),
+      ),
+    [serverData],
+  );
+  const boroughOf = useCallback(
+    (id: string) => boroughs.get(id) ?? null,
+    [boroughs],
   );
 
   // Same docks the controller drives, but in React's hands — the bubble layer is
@@ -309,9 +328,7 @@ function MapView({
         story.showOrigin();
         break;
       case "near":
-      case "reflect":
-      case "subsidy":
-      case "capped": // the near draw-out stays up until the far one plays
+      case "reflect": // the near draw-out stays up until the far one plays
         story.holdNear();
         break;
       case "far":
@@ -372,8 +389,9 @@ function MapView({
     : null;
 
   const [ref, { height }] = useMeasure();
-  // The card has content on the two draw-out steps only (see StepLegend).
-  const showCard = phase === "near" || phase === "far";
+  // The card has content on the far step only (see StepLegend); the near
+  // step's count lives in the reflect panel.
+  const showCard = phase === "far";
 
   return (
     <>
@@ -480,7 +498,7 @@ function MapView({
           }`}
         >
           {/* The intro is just the search bar — the pitch lives in IntroOverlay. */}
-          {phase !== "intro" && <Narrator />}
+          {phase !== "intro" && <Narrator boroughOf={boroughOf} />}
           {/* The map key, only on the two steps that have one, titled with the
               picked station's name. */}
           <AnimatePresence>
