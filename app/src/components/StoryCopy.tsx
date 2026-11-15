@@ -7,15 +7,10 @@ import type { Landmark } from "../data/landmarks";
 
 // The story's narrative beats, centred over the map. Separate from the
 // top-left card (station name + legends) and the bottom bar (controls), so the
-// copy reads as the moment's headline rather than a caption.
+// copy reads as the moment's headline rather than a caption. The reflect step
+// is a panel beside the map instead (ReflectPanel, built from the two pieces
+// exported below).
 const COPY: Partial<Record<Phase, ReactNode>> = {
-  reflect: <ReflectCopy />,
-  subsidy: (
-    <p>
-      Now, if New York subsidized Citi Bike — like it subsidizes every bus,
-      train, and ferry — three dollars could get you a 45-minute ride.
-    </p>
-  ),
   compare: <CompareCopy />,
   final: (
     <>
@@ -36,12 +31,20 @@ const COPY: Partial<Record<Phase, ReactNode>> = {
   ),
 };
 
+// The pitch for the far draw-out: what a subsidy would buy.
+export const SUBSIDY_COPY = (
+  <p>
+    Now, if New York subsidized Citi Bike — like it subsidizes every bus,
+    train, and ferry — three dollars could get you a 45-minute ride.
+  </p>
+);
+
 // The reflect step grounds the shed in places: the farthest landmarks it reaches
-// and the nearest it misses (landmarkReach), as two short lists. Both come from
-// data that's already loaded for the map — the pick's walkshed and its routes
-// file (for the origin) — so there's nothing extra to fetch. Until they're in,
-// or when a pick has no shed, a plain sentence stands in.
-function ReflectCopy() {
+// and the nearest it misses (landmarkReach). Both come from data that's already
+// loaded for the map — the pick's walkshed and its routes file (for the origin)
+// — so there's nothing extra to fetch. Until they're in, or when a pick has no
+// shed, the sentence is simply left out.
+export function ReflectCopy() {
   const selected = useApp((s) => s.selected);
   const walkshed = useWalkshed(selected?.id ?? null);
   const routes = useRoutes(selected?.id ?? null);
@@ -53,40 +56,29 @@ function ReflectCopy() {
   );
   const can = reach?.reachable ?? [];
   const cant = reach?.unreachable ?? [];
-  // Two lists: where the ride gets you, then what it just misses.
   return (
     <>
-      {!reach ? (
-        <p>This is how far $3 on an electric Citi Bike takes you right now.</p>
-      ) : can.length > 0 ? (
-        <>
-          <p>For $3 on an electric Citi Bike you can currently get to:</p>
-          <PlaceList list={can} />
-        </>
-      ) : (
-        <p>For $3 on an electric Citi Bike you can’t get far at all.</p>
+      <p>For $3 on an electric Citi Bike you can currently get to:</p>
+      {(can.length > 0 || cant.length > 0) && (
+        <p>
+          {can.length > 0 && cant.length > 0 ? (
+            <>
+              You can get to <Places list={can} />, but not{" "}
+              <Places list={cant} join="or" />.
+            </>
+          ) : can.length > 0 ? (
+            <>
+              You can get to <Places list={can} />.
+            </>
+          ) : (
+            <>
+              You can’t even get to <Places list={cant} join="or" />.
+            </>
+          )}
+        </p>
       )}
-      {cant.length > 0 && (
-        <>
-          <p>{can.length > 0 ? "But you can’t quite reach…" : "You can’t quite reach…"}</p>
-          <PlaceList list={cant} />
-        </>
-      )}
+      
     </>
-  );
-}
-
-// Places stacked one per line, tucked up under the sentence that introduces
-// them (the card spaces its children by gap-3).
-function PlaceList({ list }: { list: Landmark[] }) {
-  return (
-    <ul className="-mt-1.5 flex flex-col items-center gap-0.5">
-      {list.map((l) => (
-        <li key={l.id}>
-          <Place l={l} />
-        </li>
-      ))}
-    </ul>
   );
 }
 

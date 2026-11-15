@@ -3,6 +3,8 @@
 // reaches the park's edge has reached the park.
 //
 //   node scripts/build-landmark-areas.mjs      (or: npm run build:landmark-areas)
+//   node scripts/build-landmark-areas.mjs sunset-park soho   (just these; the
+//                                       rest keep their current footprints)
 //
 // Looks each landmark up on Nominatim (OpenStreetMap) with its polygon, keeps
 // the result whose footprint contains the pin (else the nearest within
@@ -24,6 +26,13 @@ const OUT = join(root, "src", "data", "landmarkAreas.json");
 const NEAR_M = 400; // a footprint that doesn't contain the pin must come this close
 const SAMPLE_M = 80; // boundary sample spacing (walkshed fingers are ≥300 m wide)
 const MAX_SAMPLES = 120;
+// Neighbourhood-type results (OSM place=* / boundary=*). Many parks share a name
+// with the neighbourhood around them (Sunset Park), and Nominatim tends to rank
+// the neighbourhood first; its polygon contains the park's pin too. So unless
+// the landmark IS a neighbourhood (the 📍 ones: SoHo, Bay Ridge…), these only
+// count when nothing more specific matched.
+const AREA_CATEGORIES = new Set(["place", "boundary"]);
+const NEIGHBOURHOOD_EMOJI = "📍";
 // Rough NYC box so "Union Square" doesn't resolve to San Francisco.
 const VIEWBOX = "-74.3,40.45,-73.65,40.95";
 
@@ -72,8 +81,10 @@ function sample(g) {
 }
 
 const landmarks = [...(await readFile(LANDMARKS_TS, "utf8")).matchAll(
-  /id: "([^"]+)", name: "([^"]+)", emoji: "[^"]*", borough: "([^"]+)", tier: \d, lon: ([-\d.]+), lat: ([-\d.]+)/g,
-)].map((m) => ({ id: m[1], name: m[2], borough: m[3], p: [Number(m[4]), Number(m[5])] }));
+  /id: "([^"]+)", name: "([^"]+)", emoji: "([^"]*)", borough: "([^"]+)", tier: \d, lon: ([-\d.]+), lat: ([-\d.]+)/g,
+)].map((m) => ({ id: m[1], name: m[2], emoji: m[3], borough: m[4], p: [Number(m[5]), Number(m[6])] }));
+// Landmark ids on the command line: rebuild only those.
+const ONLY = new Set(process.argv.slice(2));
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const areas = {};
@@ -81,6 +92,10 @@ let existing = {};
 try { existing = JSON.parse(await readFile(OUT, "utf8")); } catch {}
 
 for (const l of landmarks) {
+  if (ONLY.size && !ONLY.has(l.id)) {
+    if (existing[l.id]) areas[l.id] = existing[l.id];
+    continue;
+  }
   const q = `${l.name}, ${l.borough === "New Jersey" ? "NJ" : "New York City"}`;
   const url = `https://nominatim.openstreetmap.org/search?format=geojson&polygon_geojson=1&limit=5&bounded=1&viewbox=${VIEWBOX}&q=${encodeURIComponent(q)}`;
   let fc = null;
@@ -89,9 +104,15 @@ for (const l of landmarks) {
     if (res.ok) fc = await res.json();
   } catch {}
   await sleep(1100);
-  const shapes = (fc?.features ?? []).filter((f) => f.geometry && f.geometry.type !== "Point");
-  const hit = shapes.find((f) => contains(f.geometry, l.p)) ??
+  const all = (fc?.features ?? []).filter((f) => f.geometry && f.geometry.type !== "Point");
+  const specific = all.filter((f) => !AREA_CATEGORIES.has(f.properties.category));
+  const isNeighbourhood = l.emoji === NEIGHBOURHOOD_EMOJI;
+  // Try the specific shapes first; fall back to every shape if none of them
+  // matches the pin (or the landmark is a neighbourhood).
+  const pick = (shapes) =>
+    shapes.find((f) => contains(f.geometry, l.p)) ??
     shapes.filter((f) => nearest(f.geometry, l.p) <= NEAR_M).sort((a, b) => nearest(a.geometry, l.p) - nearest(b.geometry, l.p))[0];
+  const hit = (isNeighbourhood ? null : pick(specific)) ?? pick(all);
   if (hit) {
     areas[l.id] = sample(hit.geometry).map(([x, y]) => [+x.toFixed(4), +y.toFixed(4)]);
     console.log(`${l.name}: ${hit.geometry.type}, ${areas[l.id].length} samples  (${hit.properties.display_name.split(",")[0]})`);
@@ -100,4 +121,6 @@ for (const l of landmarks) {
   }
 }
 await writeFile(OUT, JSON.stringify(areas) + "\n"); // ~60 KB
+const unknown = [...ONLY].filter((id) => !landmarks.some((l) => l.id === id));
+if (unknown.length) console.log(`\nNo such landmark: ${unknown.join(", ")}`);
 console.log(`\n${Object.keys(areas).length}/${landmarks.length} landmarks with footprints → ${OUT}`);

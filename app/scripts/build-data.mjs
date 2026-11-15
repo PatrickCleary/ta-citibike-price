@@ -1,7 +1,8 @@
 // Generates the web app's station data from the pipeline outputs.
 //
-//  - stations.json  ->  public/stations.geojson  (slimmed: id, name, capacity)
-//                       and the same as src/data/stations.json (imported by the page)
+//  - stations.json  ->  public/stations.geojson  (slimmed: id, name, capacity,
+//                       borough) and the same as src/data/stations.json
+//                       (imported by the page)
 //
 // Source of truth (stations.json) lives at the repo root; the generated
 // stations.geojson under public/ is gitignored. Re-run when the station list
@@ -39,6 +40,52 @@ const HIDDEN_STATIONS = new Set([
 // rule as scripts/build-coverage.mjs.
 const inNewJersey = (lon, lat) => lon < -74.021 && lat > 40.68;
 
+// Each dock's borough, for the story's "From <dock> in <borough>" line. Point in
+// polygon against NYC's borough boundaries, the water-areas-included version
+// (NYC Open Data wh2p-dxnf), so docks on piers and the waterline still land
+// inside one. Anything that somehow falls outside every polygon takes the
+// nearest borough.
+const BOROUGHS = JSON.parse(
+  await readFile(join(__dirname, "data/boroughs.geojson"), "utf8"),
+).features;
+
+const inRing = (lon, lat, ring) => {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    if (yi > lat !== yj > lat && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi)
+      inside = !inside;
+  }
+  return inside;
+};
+// Holes (rings after the first) carve out of their polygon.
+const inMultiPolygon = (lon, lat, polys) =>
+  polys.some(
+    ([outer, ...holes]) =>
+      inRing(lon, lat, outer) && !holes.some((h) => inRing(lon, lat, h)),
+  );
+// Squared distance to the nearest vertex: rough, but only a fallback.
+const vertexDist2 = (lon, lat, polys) =>
+  Math.min(
+    ...polys.flat(2).map(([x, y]) => (x - lon) ** 2 + (y - lat) ** 2),
+  );
+
+let boroughFallbacks = 0;
+function boroughOf(lon, lat) {
+  const hit = BOROUGHS.find((b) =>
+    inMultiPolygon(lon, lat, b.geometry.coordinates),
+  );
+  if (hit) return hit.properties.name;
+  boroughFallbacks++;
+  let best = null;
+  for (const b of BOROUGHS) {
+    const d = vertexDist2(lon, lat, b.geometry.coordinates);
+    if (!best || d < best.d) best = { d, name: b.properties.name };
+  }
+  return best.name;
+}
+
 async function buildStations() {
   const raw = JSON.parse(await readFile(STATIONS_SRC, "utf8"));
   const stations = raw?.data?.stations ?? [];
@@ -58,6 +105,7 @@ async function buildStations() {
         station_id: s.station_id,
         name: s.name,
         capacity: s.capacity ?? null,
+        borough: boroughOf(s.lon, s.lat),
       },
     });
   }
@@ -70,3 +118,5 @@ async function buildStations() {
 await mkdir(publicDir, { recursive: true });
 const { count, nj } = await buildStations();
 console.log(`✓ stations.geojson + src/data/stations.json: ${count} stations (${nj} in New Jersey left off)`);
+if (boroughFallbacks)
+  console.log(`  ${boroughFallbacks} outside every borough polygon, given the nearest`);

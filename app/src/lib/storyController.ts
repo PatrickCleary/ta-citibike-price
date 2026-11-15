@@ -100,7 +100,12 @@ export class StoryController {
       { visible: shown.near, progress: 1, opacity: 1 }, // baked orange
       { visible: shown.far, progress: 1, opacity: 1, color: COLOR_ALL },
     );
-    this.sheds.showTiers(shown);
+    // Near switched off still leaves its ghost under the ≤45 shed, as on the
+    // default frame; exploring clears both.
+    this.sheds.showLevels({
+      near: shown.near ? "on" : explore || !shown.far ? "off" : "ghost",
+      far: shown.far ? "on" : "off",
+    });
   }
 
   // ── Draw-out animations (triggered by the UI's play buttons) ────────────────
@@ -231,16 +236,20 @@ export class StoryController {
     const id = this.selectedId()!;
     this.isolateOrigin(id);
     this.ensureDockStyling(id, key, t, !!opts?.hideTrips);
+    // The far step keeps the near shed up as a ghost throughout (rewind, draw-out
+    // and resting frame), so the ≤45 ride grows out past today's ≤11 reach.
+    const nearGhost = key === "far" && !this.explore ? "ghost" : "off";
     if (opts?.hideTrips) {
       this.trips.setTiers({ visible: false, progress: 0, opacity: 1 }, { visible: false, progress: 0, opacity: 1 });
-      this.sheds.show(null);
+      this.sheds.showLevels({ near: nearGhost, far: "off" });
       return;
     }
     const { near, all } = tiersForPhase(key, t);
     this.trips.setTiers(near, all);
     const ride = this.trips.rideSecondsFor(key);
     const docked = t >= 1 || t * ride >= this.trips.doneSecondsFor(key);
-    this.sheds.show(docked ? key : null);
+    if (key === "near") this.sheds.show(docked ? "near" : null);
+    else this.sheds.showLevels({ near: nearGhost, far: docked ? "on" : "off" });
   }
 
   private hasOrigin(): boolean {
