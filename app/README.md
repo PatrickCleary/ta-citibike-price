@@ -4,7 +4,7 @@ Static map of Citi Bike stations. Click a station to see its bike sheds — the
 area reachable within 11 and 45 minutes of riding.
 
 **Stack:** Astro (static) · MapLibre GL JS · Stadia basemap · React island ·
-Tailwind v4 · Vercel Analytics. Data is GeoJSON throughout — no tiles server.
+Tailwind v4. Data is GeoJSON throughout — no tiles server.
 
 ## Data flow
 
@@ -35,12 +35,25 @@ npm run dev          # http://localhost:4321
 Copy `.env.example` to `.env` and set `PUBLIC_STADIA_API_KEY` (free at
 stadiamaps.com). Keyless requests work from localhost during development.
 
-## Deploy (Vercel)
+## Deploy (Netlify)
 
-Set the Vercel project Root Directory to `app`. The build (`npm run build`) only
-generates `stations.geojson` from `../stations.json`, so the deployment stays
-small — sheds are served at runtime from Supabase. Set `PUBLIC_STADIA_API_KEY`
-(and optionally `PUBLIC_SHEDS_BASE_URL`) as environment variables.
+The site is fully static. `netlify.toml` at the repo root sets the base
+directory to `app`, runs `npm run build`, and publishes `app/dist`. Hooking the
+repo up to Netlify (Add new site > Import an existing project) is all that's
+needed; every push to `main` rebuilds and deploys.
+
+Set `PUBLIC_STADIA_API_KEY` under Site configuration > Environment variables
+before the first build; it is baked into the bundle at build time. Then add the
+Netlify domain (and any custom domain) to the key's allowed referrers in the
+Stadia dashboard, or the basemap tiles will 403.
+
+The build only generates `stations.geojson` from `../stations.json`, so the
+deploy stays small (about 3 MB). Per-station routes, reach lists and walksheds
+are fetched at runtime from the public Supabase bucket; see `src/lib/*.ts` for
+the `PUBLIC_*_BASE_URL` overrides.
+
+To deploy by hand instead, run `npm run build` locally and drag `app/dist` onto
+https://app.netlify.com/drop.
 
 ## Notes
 
