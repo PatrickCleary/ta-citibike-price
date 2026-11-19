@@ -1,0 +1,13 @@
+# Netlify build settings. The site is fully static: `npm run build` derives
+# stations.geojson from ../stations.json and runs `astro build` into app/dist.
+# Per-station data is fetched at runtime from Supabase, so nothing else deploys.
+#
+# Set PUBLIC_STADIA_API_KEY in the Netlify UI (Site configuration >
+# Environment variables); it is baked in at build time.
+[build]
+  base    = "app"
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
