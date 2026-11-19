@@ -55,11 +55,12 @@ import {
   type MapRef,
 } from "react-map-gl/maplibre";
 import type { Suggestion } from "../lib/geocodeSearch";
+import { withBase } from "../lib/base";
 
 const STADIA_KEY = import.meta.env.PUBLIC_STADIA_API_KEY;
 // Custom "Alidade Smooth, no labels" style. Its tiles/sprite are served by
 // Stadia (keyless on localhost); transformRequest appends the API key in prod.
-const STYLE_URL = "/data/custom_adilade_no_labels.json";
+const STYLE_URL = withBase("/data/custom_adilade_no_labels.json");
 
 const transformRequest: maplibregl.RequestTransformFunction = (url) => {
   if (STADIA_KEY && url.includes("stadiamaps.com")) {
@@ -451,7 +452,7 @@ function MapView({
             <Source
               id={DOCKS_SOURCE}
               type="geojson"
-              data="/stations.geojson"
+              data={withBase("/stations.geojson")}
               promoteId="station_id"
               maxzoom={13}
               buffer={512}
@@ -467,7 +468,7 @@ function MapView({
             <Source
               id={DOCKS_PIN_SOURCE}
               type="geojson"
-              data="/stations.geojson"
+              data={withBase("/stations.geojson")}
             >
               <Layer
                 id={DOCKS_ICON_LAYER}
@@ -571,7 +572,7 @@ function MapView({
           onClick={() => setSplash(true)}
         >
           {/* TA mark: the arrow is a cut-out, so the white button shows through. */}
-          <img src="/ta-logo-mark.svg" alt="" className="size-full" />
+          <img src={withBase("/ta-logo-mark.svg")} alt="" className="size-full" />
         </button>
       )}
 
@@ -583,7 +584,7 @@ function MapView({
         className="fixed bottom-3 left-3 hidden rounded-md bg-white/85 px-2 py-1.5 shadow-sm backdrop-blur md:block"
       >
         <img
-          src="/ta_logo_RGB_REFRESH_transparent.webp"
+          src={withBase("/ta_logo_RGB_REFRESH_transparent.webp")}
           alt="Transportation Alternatives"
           className="h-6 w-auto"
         />

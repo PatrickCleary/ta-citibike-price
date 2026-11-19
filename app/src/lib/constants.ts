@@ -1,3 +1,4 @@
+import { withBase } from "./base";
 // The brand orange. Worn by the dock dots and the station bubbles — they're
 // both the same "this is a dock" signal, so they share a hex.
 export const BRAND_ORANGE = "#F5532B";
@@ -32,7 +33,7 @@ export const ORIGIN_EASE = {
 // Outline of Citi Bike's service area (public/data/coverage.geojson, built by
 // scripts/build-coverage.mjs): a quiet dashed edge, so the basemap outside it
 // stays readable but it's clear where the system stops.
-export const COVERAGE_URL = "/data/coverage.geojson";
+export const COVERAGE_URL = withBase("/data/coverage.geojson");
 export const COVERAGE_LINE_COLOR = "#8a8a8a";
 export const COVERAGE_LINE_WIDTH = 1.25;
 export const COVERAGE_LINE_DASH = [3, 2];

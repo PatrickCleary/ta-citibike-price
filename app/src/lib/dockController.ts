@@ -25,6 +25,7 @@ import type {
 } from "maplibre-gl";
 import { CONTOURS } from "./sheds";
 import { BRAND_ORANGE } from "./constants";
+import { withBase } from "./base";
 
 export const DOCKS_SOURCE = "stations";
 // The pins get their OWN source, normally tiled — see Map.tsx. DOCKS_SOURCE is
@@ -85,7 +86,7 @@ export const ZOOM_BUBBLE = 16;
 // `maxzoom` matches it, because above this the pins are at opacity 0.
 export const ZOOM_BUBBLE_FULL = 16.4;
 
-const ICON_URL = "/tmap-icon.svg";
+const ICON_URL = withBase("/tmap-icon.svg");
 // The artwork is padded inside its 186×186 viewBox; this is the pin's tight
 // bbox, cropped on rasterize so `icon-anchor: bottom` puts the tip exactly on
 // the station rather than ~9% below it.

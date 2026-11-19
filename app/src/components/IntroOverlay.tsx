@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { motion } from "motion/react";
 import { X } from "lucide-react";
+import { withBase } from "../lib/base";
 
 // First-load splash over a dimmed map: the pitch, plus two ways in — the
 // search bar (passed in, so it's the same one the intro card uses) or picking
@@ -30,7 +31,7 @@ export default function IntroOverlay({
       </button>
       <div className="flex w-full max-w-xl flex-col gap-5 text-gray-800">
         <img
-          src="/ta_logo_RGB_REFRESH_transparent.webp"
+          src={withBase("/ta_logo_RGB_REFRESH_transparent.webp")}
           alt="Transportation Alternatives"
           className="h-10 w-auto self-start md:h-12"
         />
